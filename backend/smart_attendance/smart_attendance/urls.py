@@ -21,4 +21,5 @@ from accounts.views import RegisterStudent
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('register/', RegisterStudent.as_view()),
+    # path('attendance/', MarkAttendance.as_view()),
 ]
