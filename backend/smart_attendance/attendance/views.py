@@ -6,6 +6,11 @@ from .models import Attendance
 from django.utils import timezone
 import os
 
+from .utils.image_store import save_attendance_image_from_path
+from django.conf import settings
+import logging
+logger = logging.getLogger(__name__)
+
 class MarkAttendance(APIView):
     def post(self, request):
         print("Received attendance request")
@@ -60,8 +65,27 @@ class MarkAttendance(APIView):
                 print("Attendance already marked today")
                 return Response({"message": "Attendance already marked today"})
             Attendance.objects.create(student=student)
+            try:
+                # Save attendance image to weekday folder and cleanup old archives
+                saved_path = save_attendance_image_from_path(path, roll_no)
+                logger.info(f"Saved attendance image to {saved_path}")
+            except Exception as e:
+                logger.exception("Failed to save attendance image: %s", e)
+            finally:
+                # remove temp file if exists
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+
             print(f"Attendance marked for {student.name}")
             return Response({"message": f"Attendance marked for {student.name}"})
         else:
             print("Error: Face did not match")
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
             return Response({"error": "Face did not match"}, status=400)
