@@ -5,6 +5,9 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import AttendancePage from './pages/AttendancePage'
 import HomePage from './pages/HomePage'
 import AdminDashboard  from './pages/AdminDashboard'
+import AdminStudentsPage from './pages/AdminStudents'
+import AdminAddStudent from './pages/AdminAddStudent'
+import AdminSettings from './pages/AdminSettings'
 
 function App() {
 
@@ -14,6 +17,9 @@ function App() {
             <Route path="/" element={<AttendancePage />} />
             <Route path="/home" element={<HomePage />} />
             <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/students" element={<AdminStudentsPage />} />
+            <Route path="/admin/students/add" element={<AdminAddStudent />} />
+            <Route path="/admin/settings" element={<AdminSettings />} />
          </Routes>
     </Router>
   )
