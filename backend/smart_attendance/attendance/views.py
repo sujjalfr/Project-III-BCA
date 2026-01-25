@@ -11,11 +11,25 @@ from datetime import timedelta, date
 from accounts.models import Student
 import openpyxl
 from django.http import HttpResponse
+from datetime import time as datetime_time
 
 from .utils.image_store import save_attendance_image_from_path
 from django.conf import settings
 import logging
 logger = logging.getLogger(__name__)
+
+from datetime import timedelta, date, datetime, time as datetime_time, timezone as dt_timezone
+from django.utils import timezone
+NEPAL_TZ = timezone.get_fixed_timezone(5 * 60 + 45)  # UTC+5:45
+
+def _local_time_iso(d, t):
+    if not d or not t:
+        return None
+    utc_dt = datetime.combine(d, t, tzinfo=dt_timezone.utc)
+    return utc_dt.astimezone(NEPAL_TZ).isoformat()
+
+def _now_local_iso():
+    return timezone.localtime(timezone.now(), NEPAL_TZ).isoformat()
 
 class AttendanceStatus(APIView):
     def get(self, request):
@@ -33,7 +47,8 @@ class AttendanceStatus(APIView):
         if exists:
             att = Attendance.objects.filter(student=student, date=today).order_by("-time").first()
             if att:
-                attendance_time = att.time.isoformat()
+                # attendance_time = att.time.isoformat()
+                attendance_time = _local_time_iso(today, att.time)
 
         return Response({
             "alreadyMarked": exists,
@@ -44,6 +59,60 @@ class AttendanceStatus(APIView):
             "department": student.department.name if student.department else None,
             "time": attendance_time
         })
+
+class AttendanceStatusList(APIView):
+    """List attendance status for all students today"""
+    def get(self, request):
+        today = timezone.now().date()
+        students = Student.objects.select_related('class_group', 'batch', 'department').all()
+        
+        # Define cutoff times
+        CUTOFF_TIME = datetime_time(9, 0)  # 9:00 AM - on_time before this
+        LATE_TIME = datetime_time(9, 30)   # 9:30 AM - late after this
+        
+        result = []
+        for student in students:
+            exists = Attendance.objects.filter(student=student, date=today).exists()
+            attendance_time = None
+            status = "absent"
+            
+            if exists:
+                att = Attendance.objects.filter(student=student, date=today).order_by("-time").first()
+                if att:
+                    _local_dt_iso = _local_time_iso(today, att.time)
+                    attendance_time = _local_dt_iso
+                    local_dt = datetime.fromisoformat(local_dt_iso)
+                    att_time_local = local_dt.time()
+                    if(att_time_local <= CUTOFF_TIME):
+                        status = "on_time"
+                    elif att_time_local <= LATE_TIME:
+                        status = "late"
+                    else:
+                        status = "late"
+                    # attendance_time = att.time.isoformat()
+                    
+                    # # Determine status based on time
+                    # att_time = att.time.time()  # Extract time portion
+                    # if att_time <= CUTOFF_TIME:
+                    #     status = "on_time"
+                    # elif att_time <= LATE_TIME:
+                    #     status = "late"
+                    # else:
+                    #     status = "late"  # Very late
+            
+            result.append({
+                "id": student.id,
+                "roll_no": student.roll_no,
+                "name": student.name,
+                "class": student.class_group.name if student.class_group else None,
+                "batch": student.batch.name if student.batch else None,
+                "department": student.department.name if student.department else None,
+                "alreadyMarked": exists,
+                "time": attendance_time,
+                "status": status
+            })
+        
+        return Response({"results": result})
 
 class MarkAttendance(APIView):
     def post(self, request):
@@ -74,8 +143,9 @@ class MarkAttendance(APIView):
                 "class": student.class_group.name if student.class_group else None,
                 "batch": student.batch.name if student.batch else None,
                 "department": student.department.name if student.department else None,
-                "time": existing_att.time.isoformat() if existing_att else None
-            })
+                # "time": existing_att.time.isoformat() if existing_att else None
+                "time": _local_time_iso(today, existing_att.time) if existing_att else None
+})
         if Attendance.objects.filter(student=student, date=today).exists():
             print("Attendance already marked today")
             return Response({"message": "Attendance already marked today"})
@@ -110,15 +180,13 @@ class MarkAttendance(APIView):
             if Attendance.objects.filter(student=student, date=today).exists():
                 print("Attendance already marked today")
                 return Response({"message": "Attendance already marked today"})
-            Attendance.objects.create(student=student)
+            attendance = Attendance.objects.create(student=student)  # <-- capture created record
             try:
-                # Save attendance image to weekday folder and cleanup old archives
                 saved_path = save_attendance_image_from_path(path, roll_no)
                 logger.info(f"Saved attendance image to {saved_path}")
             except Exception as e:
                 logger.exception("Failed to save attendance image: %s", e)
             finally:
-                # remove temp file if exists
                 try:
                     if os.path.exists(path):
                         os.remove(path)
@@ -133,7 +201,8 @@ class MarkAttendance(APIView):
                 "class": student.class_group.name if student.class_group else None,
                 "batch": student.batch.name if student.batch else None,
                 "department": student.department.name if student.department else None,
-                "time": attendance.time.isoformat() if attendance else None
+                # "time": attendance.time.isoformat() if attendance else None
+                "time": _now_local_iso()
             })
         else:
             print("Error: Face did not match")

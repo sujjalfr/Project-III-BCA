@@ -202,7 +202,7 @@ const AttendancePage = () => {
                         "N/A"}
                     </div>
                     <div>
-                      Department:{" "}
+                      Department:{" "}Last Atte
                       {lastAttendance.department ||
                         lastAttendance.departmentName ||
                         "N/A"}
@@ -215,6 +215,7 @@ const AttendancePage = () => {
                         "N/A"}
                     </div>
                     <div>
+                      {console.log(lastAttendance)}
                       Status: {lastAttendance.success ? "Success" : "Failed"}
                     </div>
                   </div>

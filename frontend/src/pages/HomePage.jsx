@@ -77,10 +77,10 @@ const StatusBadge = ({ status }) => {
 function HomePage() {
   const [metrics, setMetrics] = useState(null);
   const [students, setStudents] = useState([]);
+  const [showAttendanceStatus, setShowAttendanceStatus] = useState([]);
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState("7d");
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(() => {});
   const navigate = useNavigate();
 
   // filters
@@ -88,18 +88,44 @@ function HomePage() {
   const [showLateOnly, setShowLateOnly] = useState(false);
   const [search, setSearch] = useState("");
 
-
   useEffect(() => {
-    let mounted = true
-    axios.get(`${API_BASE}/api/departments/`)
-      .then(r => {
-        if (!mounted) return
-        // ensure ids are strings for select values
-        setDepartments((r.data || []).map(d => ({ ...d, id: String(d.id) })))
+    let mounted = true;
+    axios
+      .get(`${API_BASE}/api/students/`)
+      .then((r) => {
+        if (!mounted) return;
+        setStudents(
+          (r.data.results || []).map((d) => ({ ...d, id: String(d.id) })),
+        );
       })
-      .catch(() => setDepartments([]))
-    return () => { mounted = false }
-  }, [])
+      .catch(() => setStudents([]));
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Fetch data
+  useEffect(() => {
+    let mounted = true;
+    axios
+      .get(`${API_BASE}/api/attendanceStatus/list/`)
+      .then((r) => {
+        if (!mounted) return;
+        setShowAttendanceStatus(
+          (r.data.results || []).map((d) => ({ ...d, id: String(d.id) })),
+        );
+      })
+      .catch((err) => {
+        console.error("Failed to fetch attendance status:", err);
+        setShowAttendanceStatus([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  useEffect(() => {
+    console.log("Attendance Status Updated:", showAttendanceStatus, students);
+  }, [showAttendanceStatus, students]);
 
   useEffect(() => {
     setLoading(true);
@@ -112,38 +138,38 @@ function HomePage() {
         scansPerHour: [5, 12, 20, 14, 8, 6, 3],
       });
 
-      setStudents([
-        {
-          id: 1,
-          name: "Aisha Khan",
-          class: "10A",
-          status: "on_time",
-          timeIn: "08:45",
-        },
-        {
-          id: 2,
-          name: "Ravi Patel",
-          class: "10B",
-          status: "late",
-          timeIn: "09:20",
-        },
-        { id: 3, name: "Maya Singh", class: "10A", status: "absent" },
-        {
-          id: 4,
-          name: "Arjun Rao",
-          class: "10C",
-          status: "on_time",
-          timeIn: "08:50",
-        },
-        {
-          id: 5,
-          name: "Zara Ali",
-          class: "10B",
-          status: "late",
-          timeIn: "09:05",
-        },
-        { id: 6, name: "Kabir Shah", class: "10A", status: "absent" },
-      ]);
+      // setStudents([
+      //   {
+      //     id: 1,
+      //     name: "Aisha Khan",
+      //     class: "10A",
+      //     status: "on_time",
+      //     timeIn: "08:45",
+      //   },
+      //   {
+      //     id: 2,
+      //     name: "Ravi Patel",
+      //     class: "10B",
+      //     status: "late",
+      //     timeIn: "09:20",
+      //   },
+      //   { id: 3, name: "Maya Singh", class: "10A", status: "absent" },
+      //   {
+      //     id: 4,
+      //     name: "Arjun Rao",
+      //     class: "10C",
+      //     status: "on_time",
+      //     timeIn: "08:50",
+      //   },
+      //   {
+      //     id: 5,
+      //     name: "Zara Ali",
+      //     class: "10B",
+      //     status: "late",
+      //     timeIn: "09:05",
+      //   },
+      //   { id: 6, name: "Kabir Shah", class: "10A", status: "absent" },
+      // ]);
 
       setLastUpdated(new Date());
       setLoading(false);
@@ -162,10 +188,7 @@ function HomePage() {
     }, 300);
   };
 
-  const absentCount = students.filter((s) => s.status === "absent").length;
-  const lateCount = students.filter((s) => s.status === "late").length;
-
-  const filtered = students.filter((s) => {
+  const filtered = showAttendanceStatus.filter((s) => {
     if (showAbsentOnly && s.status !== "absent") return false;
     if (showLateOnly && s.status !== "late") return false;
     if (
@@ -175,6 +198,9 @@ function HomePage() {
       return false;
     return true;
   });
+
+  const absentCount = students.filter((s) => s.status === "absent").length;
+  const lateCount = students.filter((s) => s.status === "late").length;
 
   return (
     <div style={{ padding: 20 }}>
@@ -330,6 +356,7 @@ function HomePage() {
                 </td>
               </tr>
             )}
+            {/* {console.log(students)} */}
             {filtered.map((s) => (
               <tr key={s.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "10px 6px" }}>{s.name}</td>
@@ -337,7 +364,14 @@ function HomePage() {
                 <td style={{ padding: "10px 6px" }}>
                   <StatusBadge status={s.status} />
                 </td>
-                <td style={{ padding: "10px 6px" }}>{s.timeIn || "—"}</td>
+                <td style={{ padding: "10px 6px" }}>
+                  {s.time
+                    ? new Date(s.time).toLocaleTimeString("en-US", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "—"}
+                </td>
               </tr>
             ))}
           </tbody>

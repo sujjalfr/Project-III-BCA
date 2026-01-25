@@ -23,12 +23,18 @@ from accounts.views import (
     batch_classgroups,
     StudentListView,
 )
-from attendance.views import MarkAttendance
+from attendance.views import (
+    MarkAttendance,
+    AttendanceStatus,
+    AttendanceStatusList
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('register/', RegisterStudent.as_view()),
     path('api/students/', StudentListView.as_view()),
+    path('api/attendanceStatus/', AttendanceStatus.as_view()),
+    path('api/attendanceStatus/list/', AttendanceStatusList.as_view()),
     path('api/departments/', departments_list),
     path('api/departments/<int:dept_id>/batches/', department_batches),
     path('api/batches/<int:batch_id>/classgroups/', batch_classgroups),
