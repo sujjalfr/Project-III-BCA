@@ -25,11 +25,14 @@ from accounts.views import (
     all_batches,
     all_classgroups,
     department_classgroups,
+    StudentDetailView,
 )
 from attendance.views import (
     MarkAttendance,
     AttendanceStatus,
-    AttendanceStatusList
+    AttendanceStatusList,
+    StudentAttendanceDetail,
+    AttendanceUpdateAPIView,
 )
 
 urlpatterns = [
@@ -45,4 +48,7 @@ urlpatterns = [
     path('api/batches/<int:batch_id>/classgroups/', batch_classgroups),
     path('api/classgroups/', all_classgroups),
     path('attendance/', MarkAttendance.as_view()),
+    path('api/student/<str:roll_no>/attendance/', StudentAttendanceDetail.as_view()),
+    path('api/students/<int:pk>/', StudentDetailView.as_view()),
+    path('api/attendance/<int:pk>/', AttendanceUpdateAPIView.as_view()),
 ]

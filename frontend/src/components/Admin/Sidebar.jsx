@@ -45,13 +45,17 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
     };
   }, [open, onClose]);
 
-  // If parent opens the sidebar (mobile), also expand on larger screens
-//   useEffect(() => {
-//     try {
-//       const isDesktop = window.innerWidth >= 768;
-//       if (open && isDesktop) setCollapsed(false);
-//     } catch (e) {}
-//   }, [open]);
+  // When closing, ensure no focused element remains inside the hidden sidebar
+  useEffect(() => {
+    if (!open && ref.current) {
+      const active = document.activeElement;
+      if (active && ref.current.contains(active)) {
+        try {
+          active.blur();
+        } catch {}
+      }
+    }
+  }, [open]);
 
   return (
     <aside
@@ -62,7 +66,8 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
       className={`fixed inset-y-0 left-0 bg-gray-800 text-white transform h-screen ${
         open ? "translate-x-0" : "-translate-x-full"
       } md:translate-x-0 ${collapsed ? "w-16" : "w-64"} transition-[width,transform] duration-300 z-40 md:z-auto md:static overflow-hidden`}
-      aria-hidden={!open}
+      // Removed aria-hidden; use inert to prevent focus when closed
+      inert={!open}
     >
       <div className="p-4 flex items-center justify-between">
         {/* <h2 className="text-lg font-semibold">Admin</h2> */}
@@ -84,7 +89,7 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
         {[
           { to: "/admin", label: "Overview", icon: "M3 12h18" },
           { to: "/admin/students", label: "Students", icon: "M3 6h18M3 12h18M3 18h18" },
-          { to: "/admin/students/add", label: "Add Student", icon: "M12 5v14M5 12h14" },
+          { to: "/admin/student", label: "Student Detail", icon: "M2 12h20M12 2v20" },
           { to: "/admin/settings", label: "Settings", icon: "M12 8a4 4 0 100 8 4 4 0 000-8z" },
         ].map((item) => (
           <NavLink
@@ -94,6 +99,8 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
               `flex items-center gap-3 px-3 py-2 rounded ${isActive ? "bg-gray-700" : "hover:bg-gray-700"}`
             }
             title={item.label}
+            // Prevent focus when sidebar is closed
+            tabIndex={open ? 0 : -1}
           >
             <span className="w-6 h-6 flex items-center justify-center">
               <svg
@@ -109,7 +116,7 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
             <span className={`${collapsed ? "hidden" : "inline"}`}>{item.label}</span>
           </NavLink>
         ))}
-
+                
         <div className="mt-4 px-2">
           <button
             onClick={(e) => {

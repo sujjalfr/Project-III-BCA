@@ -271,3 +271,114 @@ class ExportAttendanceExcelAPIView(APIView):
         resp['Content-Disposition'] = f'attachment; filename=attendance_{start}_{end}.xlsx'
         wb.save(resp)
         return resp
+
+from rest_framework import status
+from django.db.models import Q
+from rest_framework import generics
+from .serializers import AttendanceSerializer
+
+class StudentAttendanceDetail(APIView):
+    """
+    Returns attendance stats and records for a student.
+    Query params:
+      - date_from (YYYY-MM-DD, optional)
+      - date_to (YYYY-MM-DD, optional)
+    """
+    def get(self, request, roll_no):
+        date_from = request.GET.get("date_from")
+        date_to = request.GET.get("date_to")
+        try:
+            student = Student.objects.select_related("class_group", "batch", "department").get(roll_no=roll_no)
+        except Student.DoesNotExist:
+            return Response({"error": "Student not found"}, status=404)
+
+        qs = Attendance.objects.filter(student=student)
+
+        # Parse date filters safely
+        start = end = None
+        try:
+            if date_from:
+                start = datetime.strptime(date_from, "%Y-%m-%d").date()
+                qs = qs.filter(date__gte=start)
+            if date_to:
+                end = datetime.strptime(date_to, "%Y-%m-%d").date()
+                qs = qs.filter(date__lte=end)
+        except ValueError:
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+
+        if start is None or end is None:
+            if qs.exists():
+                start = qs.order_by("date").first().date
+                end = qs.order_by("-date").first().date
+
+        # Build date range and counts
+        all_dates = []
+        if start and end and end >= start:
+            delta = (end - start).days
+            all_dates = [start + timedelta(days=i) for i in range(delta + 1)]
+
+        present_days = qs.count()
+        present_dates = set(qs.values_list("date", flat=True))
+        absent_days = len([d for d in all_dates if d not in present_dates]) if all_dates else 0
+        total_days = len(all_dates) if all_dates else present_days
+
+        # Status breakdown with timezone-safe comparison
+        status_counts = {"on_time": 0, "late": 0}
+        CUTOFF_TIME = datetime_time(9, 0)
+        LATE_TIME = datetime_time(9, 30)
+
+        def _naive_time(t):
+            return t.replace(tzinfo=None) if t and getattr(t, "tzinfo", None) else t
+
+        for att in qs:
+            att_time = _naive_time(att.time)
+            if att_time:
+                if att_time <= CUTOFF_TIME:
+                    status_counts["on_time"] += 1
+                elif att_time <= LATE_TIME:
+                    status_counts["late"] += 1
+                else:
+                    status_counts["late"] += 1
+
+        records = [
+            {
+                "date": a.date.isoformat(),
+                "time": (_naive_time(a.time).isoformat() if _naive_time(a.time) else None),
+                "status": (
+                    "on_time" if (_naive_time(a.time) and _naive_time(a.time) <= CUTOFF_TIME)
+                    else "late" if (_naive_time(a.time) and _naive_time(a.time) <= LATE_TIME)
+                    else "late" if a.time else "absent"
+                ),
+            }
+            for a in qs.order_by("-date")
+        ]
+
+        return Response({
+            "roll_no": student.roll_no,
+            "name": student.name,
+            "class": student.class_group.name if student.class_group else None,
+            "batch": student.batch.name if student.batch else None,
+            "department": student.department.name if student.department else None,
+            "present_days": present_days,
+            "absent_days": absent_days,
+            "on_time_days": status_counts["on_time"],
+            "late_days": status_counts["late"],
+            "total_days": total_days,
+            "records": records,
+        })
+
+class AttendanceUpdateAPIView(generics.RetrieveUpdateAPIView):
+    queryset = Attendance.objects.all()
+    serializer_class = AttendanceSerializer
+    lookup_field = "pk"
+    
+    def patch(self, request, *args, **kwargs):
+        """Handle PATCH request for partial updates"""
+        try:
+            return super().patch(request, *args, **kwargs)
+        except Exception as e:
+            logger.exception("Error updating attendance: %s", e)
+            return Response(
+                {"detail": f"Failed to update attendance: {str(e)}"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )

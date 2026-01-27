@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import ChainedSelects from "../components/Admin/StudentManagement/ChainedSelects";
 import Sidebar from "../components/Admin/Sidebar";
 import { useNavigate } from "react-router-dom";
@@ -89,6 +89,9 @@ function HomePage() {
   const [showLateOnly, setShowLateOnly] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Add filters state
+  const [filters, setFilters] = useState({ deptId: '', batchId: '', classGroupId: '' });
+
   useEffect(() => {
     let mounted = true;
     axios
@@ -130,20 +133,59 @@ function HomePage() {
 
   useEffect(() => {
     setLoading(true);
-    const t = setTimeout(() => {
-      // mock metrics + students — replace with real API call
-      setMetrics({
-        attendance: 92,
-        attendanceDelta: -1.2,
-        activeStudents: 312,
-        scansPerHour: [5, 12, 20, 14, 8, 6, 3],
-      });
+    // Calculate metrics from attendance data
+    const calculateMetrics = () => {
+      if (showAttendanceStatus.length === 0 || students.length === 0) {
+        setMetrics(null);
+        setLoading(false);
+        return;
+      }
 
-      setLastUpdated(new Date());
+      // Count attendance statistics for today
+      const presentCount = showAttendanceStatus.filter(s => s.alreadyMarked).length;
+      const absentCount = showAttendanceStatus.filter(s => !s.alreadyMarked).length;
+      const lateCount = showAttendanceStatus.filter(s => s.status === 'late').length;
+      const onTimeCount = showAttendanceStatus.filter(s => s.status === 'on_time').length;
+
+      const totalStudents = showAttendanceStatus.length || 1;
+      const attendancePercent = Math.round((presentCount / totalStudents) * 100);
+
+      // Calculate scans per hour (mock distribution for today)
+      const now = new Date();
+      const scansPerHour = [];
+      for (let i = 0; i < 24; i++) {
+        const hour = i;
+        const hourScans = showAttendanceStatus.filter(s => {
+          if (!s.time) return false;
+          try {
+            const scanTime = new Date(s.time);
+            return scanTime.getHours() === hour;
+          } catch {
+            return false;
+          }
+        }).length;
+        scansPerHour.push(hourScans);
+      }
+
+      setMetrics({
+        attendance: attendancePercent,
+        attendanceDelta: attendancePercent >= 90 ? 2.5 : -1.2, // mock delta
+        activeStudents: presentCount,
+        totalStudents: totalStudents,
+        absentCount: absentCount,
+        lateCount: lateCount,
+        onTimeCount: onTimeCount,
+        scansPerHour: scansPerHour,
+      });
       setLoading(false);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [range]);
+    };
+
+    const timer = setTimeout(() => {
+      calculateMetrics();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [showAttendanceStatus, range]);
 
   const refresh = () => {
     // replace with real fetch to update metrics + students:
@@ -156,33 +198,46 @@ function HomePage() {
     }, 300);
   };
 
+  // Apply all filters together
   const filtered = showAttendanceStatus.filter((s) => {
+    // Find corresponding student to get department/batch/class info
+    const student = students.find(st => st.roll_no === s.roll_no);
+    
+    // Status filters (absent/late)
     if (showAbsentOnly && s.status !== "absent") return false;
     if (showLateOnly && s.status !== "late") return false;
-    if (
-      search &&
-      !`${s.name} ${s.class}`.toLowerCase().includes(search.toLowerCase())
-    )
+    
+    // Search filter
+    if (search && !`${s.name} ${s.class || ''}`.toLowerCase().includes(search.toLowerCase())) {
       return false;
+    }
+    
+    // Department/Batch/Class filters
+    if (student) {
+      if (filters.deptId && String(student.department?.id || '') !== String(filters.deptId)) {
+        return false;
+      }
+      if (filters.batchId && String(student.batch?.id || '') !== String(filters.batchId)) {
+        return false;
+      }
+      if (filters.classGroupId && String(student.class_group?.id || '') !== String(filters.classGroupId)) {
+        return false;
+      }
+    } else if (filters.deptId || filters.batchId || filters.classGroupId) {
+      // If filters are active but student not found, exclude this record
+      return false;
+    }
+    
     return true;
   });
 
-  // Apply department/batch/class filters
-  const [filters, setFilters] = useState({ deptId: '', batchId: '', classGroupId: '' });
-  
-  const finalFiltered = filtered.filter(s => {
-    const student = students.find(st => st.roll_no === s.roll_no);
-    if (!student) return true;
-    
-    if (filters.deptId && student.department?.id !== filters.deptId) return false;
-    if (filters.batchId && student.batch?.id !== filters.batchId) return false;
-    if (filters.classGroupId && student.class_group?.id !== filters.classGroupId) return false;
-    
-    return true;
-  });
+  const absentCount = metrics?.absentCount || 0;
+  const lateCount = metrics?.lateCount || 0;
 
-  const absentCount = students.filter((s) => s.status === "absent").length;
-  const lateCount = students.filter((s) => s.status === "late").length;
+  // Memoize the filter change handler
+  const handleFilterChange = useCallback((filterValues) => {
+    setFilters(filterValues);
+  }, []);
 
   return (
     <div style={{ padding: 20 }}>
@@ -241,12 +296,15 @@ function HomePage() {
             minWidth: 260,
           }}
         >
-          <div style={{ fontSize: 12, color: "#666" }}>Scans / hour</div>
+          <div style={{ fontSize: 12, color: "#666" }}>Scans / hour (today)</div>
           {metrics ? (
-            <Sparkline points={metrics.scansPerHour} width={220} />
+            <Sparkline points={metrics.scansPerHour.slice(6, 18)} width={220} height={40} />
           ) : (
             <div style={{ height: 30 }} />
           )}
+          <div style={{ fontSize: 10, color: "#999", marginTop: 4 }}>
+            Total scans: {metrics ? metrics.scansPerHour.reduce((a, b) => a + b, 0) : 0}
+          </div>
         </div>
       </div>
 
@@ -260,9 +318,7 @@ function HomePage() {
       >
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <ChainedSelects
-            onChange={(filterValues) => {
-              setFilters(filterValues);
-            }}
+            onChange={handleFilterChange}
           />
           <label style={{ fontSize: 13 }}>
             <input
@@ -330,14 +386,14 @@ function HomePage() {
             </tr>
           </thead>
           <tbody>
-            {finalFiltered.length === 0 && (
+            {filtered.length === 0 && (
               <tr>
                 <td colSpan={4} style={{ padding: 12, color: "#6b7280" }}>
                   No students match filters.
                 </td>
               </tr>
             )}
-            {finalFiltered.map((s) => (
+            {filtered.map((s) => (
               <tr key={s.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "10px 6px" }}>{s.name}</td>
                 <td style={{ padding: "10px 6px" }}>{s.class}</td>

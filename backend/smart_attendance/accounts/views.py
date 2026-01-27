@@ -126,3 +126,8 @@ class StudentListView(generics.ListAPIView):
         return qs
 
 
+class StudentDetailView(generics.RetrieveUpdateAPIView):
+    queryset = Student.objects.all()
+    serializer_class = StudentSerializer
+
+
