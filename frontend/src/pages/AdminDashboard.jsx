@@ -5,7 +5,7 @@ import Sidebar from "../components/Admin/Sidebar";
 import ChainedSelects from "../components/Admin/StudentManagement/ChainedSelects";
 import { formatNPTOrDash } from "../utils/helpers";
 
-const API_BASE = import.meta.env.VITE_API_BASE;
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 const StatusBadge = ({ status }) => {
   const map = {
@@ -163,15 +163,21 @@ export default function AdminDashboard() {
   // Load students
   useEffect(() => {
     let mounted = true;
+    console.log(`Loading students from: ${API_BASE}/api/students/?page_size=1000`);
     axios
       .get(`${API_BASE}/api/students/?page_size=1000`)
       .then((r) => {
         if (!mounted) return;
+        console.log("Students loaded:", r.data);
+        const data = r.data.results || r.data || [];
         setStudents(
-          (r.data.results || []).map((d) => ({ ...d, id: String(d.id) })),
+          (Array.isArray(data) ? data : []).map((d) => ({ ...d, id: String(d.id) })),
         );
       })
-      .catch(() => setStudents([]));
+      .catch((err) => {
+        console.error("Failed to load students:", err);
+        setStudents([]);
+      });
     return () => {
       mounted = false;
     };
@@ -184,11 +190,16 @@ export default function AdminDashboard() {
       .get(`${API_BASE}/api/attendanceStatus/list/`)
       .then((r) => {
         if (!mounted) return;
-        setAttendance(
-          (r.data.results || []).map((d) => ({ ...d, id: String(d.id) })),
-        );
+        const data = (r.data.results || []).map((d) => ({ 
+          ...d, 
+          id: String(d.id) 
+        }));
+        setAttendance(data);
       })
-      .catch(() => setAttendance([]));
+      .catch((err) => {
+        console.error("Failed to load attendance:", err);
+        setAttendance([]);
+      });
     return () => {
       mounted = false;
     };

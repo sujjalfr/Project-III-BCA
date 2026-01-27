@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import Student, Department, Batch, ClassGroup
 
 class StudentSerializer(serializers.ModelSerializer):
-    image = serializers.ImageField(write_only=True, required=False)  # for upload flow
+    image = serializers.ImageField(write_only=True, required=False)
     department = serializers.SerializerMethodField(read_only=True)
     batch = serializers.SerializerMethodField(read_only=True)
     class_group = serializers.SerializerMethodField(read_only=True)

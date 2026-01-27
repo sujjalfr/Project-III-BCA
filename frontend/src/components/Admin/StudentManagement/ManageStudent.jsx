@@ -19,34 +19,53 @@ export default function ManageStudent() {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setError("");
 
     axios
       .get(`${API_BASE}/api/students/?page_size=1000`)
       .then((r) => {
         if (!mounted) return;
-        const data = (r.data.results || []).map((d) => ({
-          id: d.id,
-          name: d.name,
-          roll: d.roll_no,
-          batch: typeof d.batch === 'object' && d.batch ? d.batch.name : d.batch || "—",
-          department: typeof d.department === 'object' && d.department ? d.department.name : d.department || "—",
-          class: typeof d.class_group === 'object' && d.class_group ? d.class_group.name : d.class_group || "—",
-          image: d.image ? `${API_BASE}/media/${d.image}` : "https://i.pravatar.cc/40?img=1",
-          face_encoding: d.face_encoding,
-          qr_code: d.qr_code,
-          created_at: d.created_at,
-          // Keep original nested objects for editing
-          batchObj: d.batch,
-          departmentObj: d.department,
-          classGroupObj: d.class_group,
-        }));
+        console.log("Students response:", r.data);
+
+        // Handle both paginated and non-paginated responses
+        const studentsData = r.data.results || r.data || [];
+        console.log(`Loaded ${Array.isArray(studentsData) ? studentsData.length : 0} students`);
+
+        const data = (Array.isArray(studentsData) ? studentsData : []).map((d) => {
+          // Construct proper image URL
+          let imageUrl = "https://i.pravatar.cc/40?img=1";
+          if (d.image) {
+            if (d.image.startsWith('http')) {
+              imageUrl = d.image;
+            } else {
+              imageUrl = `${API_BASE}/media/${d.image}`;
+            }
+          }
+
+          return {
+            id: d.id,
+            name: d.name,
+            roll: d.roll_no,
+            batch: typeof d.batch === 'object' && d.batch ? d.batch.name : d.batch || "—",
+            department: typeof d.department === 'object' && d.department ? d.department.name : d.department || "—",
+            class: typeof d.class_group === 'object' && d.class_group ? d.class_group.name : d.class_group || "—",
+            image: imageUrl,
+            face_encoding: d.face_encoding,
+            qr_code: d.qr_code,
+            created_at: d.created_at,
+            batchObj: d.batch,
+            departmentObj: d.department,
+            classGroupObj: d.class_group,
+          };
+        });
         setStudents(data);
         setError("");
       })
       .catch((err) => {
         if (!mounted) return;
         console.error("Failed to fetch students:", err);
-        setError("Failed to load students. Please try again.");
+        const errMsg = err?.response?.data?.error || err?.message || "Failed to load students. Please check server connection.";
+        setError(errMsg);
         setStudents([]);
       })
       .finally(() => {
@@ -164,6 +183,7 @@ export default function ManageStudent() {
                       alt="avatar"
                       className="w-8 h-8 rounded-full object-cover bg-gray-200"
                       onError={(e) => {
+                        console.error("Student image failed to load:", s.image);
                         e.target.src = "https://i.pravatar.cc/40?img=1";
                       }}
                     />

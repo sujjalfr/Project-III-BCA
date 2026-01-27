@@ -15,40 +15,37 @@ Including another URLconf
     2.  Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
-from accounts.views import (
-    RegisterStudent,
-    departments_list,
-    department_batches,
-    batch_classgroups,
-    StudentListView,
-    all_batches,
-    all_classgroups,
-    department_classgroups,
-    StudentDetailView,
-)
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from rest_framework.routers import DefaultRouter
+from accounts.views import StudentViewSet, StudentListView, departments_list, department_batches, department_classgroups, all_batches, batch_classgroups, all_classgroups
 from attendance.views import (
-    MarkAttendance,
-    AttendanceStatus,
-    AttendanceStatusList,
-    StudentAttendanceDetail,
-    AttendanceUpdateAPIView,
+    AttendanceStatus, AttendanceStatusList, MarkAttendance,
+    MostAbsentAPIView, ExportAttendanceExcelAPIView,
+    StudentAttendanceDetail, AttendanceUpdateAPIView
 )
+
+router = DefaultRouter()
+router.register(r'students', StudentViewSet, basename='student')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('register/', RegisterStudent.as_view()),
-    path('api/students/', StudentListView.as_view()),
+    path('api/', include(router.urls)),
     path('api/attendanceStatus/', AttendanceStatus.as_view()),
     path('api/attendanceStatus/list/', AttendanceStatusList.as_view()),
+    path('api/attendance/', MarkAttendance.as_view()),
+    path('api/attendance/<int:pk>/', AttendanceUpdateAPIView.as_view()),
+    path('api/student/<str:roll_no>/attendance/', StudentAttendanceDetail.as_view()),
+    path('api/students/', StudentListView.as_view()),
     path('api/departments/', departments_list),
     path('api/departments/<int:dept_id>/batches/', department_batches),
     path('api/departments/<int:dept_id>/classgroups/', department_classgroups),
     path('api/batches/', all_batches),
     path('api/batches/<int:batch_id>/classgroups/', batch_classgroups),
     path('api/classgroups/', all_classgroups),
-    path('attendance/', MarkAttendance.as_view()),
-    path('api/student/<str:roll_no>/attendance/', StudentAttendanceDetail.as_view()),
-    path('api/students/<int:pk>/', StudentDetailView.as_view()),
-    path('api/attendance/<int:pk>/', AttendanceUpdateAPIView.as_view()),
 ]
+
+# Serve media files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

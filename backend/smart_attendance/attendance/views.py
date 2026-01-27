@@ -48,24 +48,23 @@ class AttendanceStatus(APIView):
         except Student.DoesNotExist:
             return Response({"error": "Student not found"}, status=404)
         today = timezone.now().date()
-        exists = Attendance.objects.filter(student=student, date=today).exists()
-        # if already marked, include attendance time
-        attendance_time = None
-        if exists:
-            att = Attendance.objects.filter(student=student, date=today).order_by("-time").first()
-            if att:
-                # attendance_time = att.time.isoformat()
-                attendance_time = _local_time_iso(today, att.time)
-
-        return Response({
+        att = Attendance.objects.filter(student=student, date=today).first()
+        exists = att is not None
+        
+        # Build response
+        response_data = {
+            "id": att.id if att else None,
             "alreadyMarked": exists,
             "roll_no": roll_no,
             "name": student.name,
             "class": student.class_group.name if student.class_group else None,
             "batch": student.batch.name if student.batch else None,
             "department": student.department.name if student.department else None,
-            "time": attendance_time
-        })
+            "time": att.time.isoformat() if att and att.time else None,
+            "status": att.status if att else "absent",
+        }
+        
+        return Response(response_data)
 
 class AttendanceStatusList(APIView):
     """List attendance status for all students today"""
@@ -73,50 +72,21 @@ class AttendanceStatusList(APIView):
         today = timezone.now().date()
         students = Student.objects.select_related('class_group', 'batch', 'department').all()
         
-        # Define cutoff times
-        CUTOFF_TIME = datetime_time(9, 0)  # 9:00 AM - on_time before this
-        LATE_TIME = datetime_time(9, 30)   # 9:30 AM - late after this
-        
         result = []
         for student in students:
-            exists = Attendance.objects.filter(student=student, date=today).exists()
-            attendance_time = None
-            status = "absent"
-            
-            if exists:
-                att = Attendance.objects.filter(student=student, date=today).order_by("-time").first()
-                if att:
-                    _local_dt_iso = _local_time_iso(today, att.time)
-                    attendance_time = _local_dt_iso
-                    local_dt = datetime.fromisoformat(_local_dt_iso)
-                    att_time_local = local_dt.time()
-                    if(att_time_local <= CUTOFF_TIME):
-                        status = "on_time"
-                    elif att_time_local <= LATE_TIME:
-                        status = "late"
-                    else:
-                        status = "late"
-                    # attendance_time = att.time.isoformat()
-                    
-                    # # Determine status based on time
-                    # att_time = att.time.time()  # Extract time portion
-                    # if att_time <= CUTOFF_TIME:
-                    #     status = "on_time"
-                    # elif att_time <= LATE_TIME:
-                    #     status = "late"
-                    # else:
-                    #     status = "late"  # Very late
+            att = Attendance.objects.filter(student=student, date=today).first()
+            exists = att is not None
             
             result.append({
-                "id": student.id,
+                "id": att.id if att else student.id,
                 "roll_no": student.roll_no,
                 "name": student.name,
                 "class": student.class_group.name if student.class_group else None,
                 "batch": student.batch.name if student.batch else None,
                 "department": student.department.name if student.department else None,
                 "alreadyMarked": exists,
-                "time": attendance_time,
-                "status": status
+                "time": att.time.isoformat() if att and att.time else None,
+                "status": att.status if att else "absent",
             })
         
         return Response({"results": result})
@@ -138,11 +108,11 @@ class MarkAttendance(APIView):
             print(f"Error: Student with roll_no {roll_no} not found")
             return Response({"error": "Student not found"}, status=404)
 
-        # Check if attendance is already marked for today before proceeding
+        # Check if attendance is already marked for today
         today = timezone.now().date()
-        existing_att = Attendance.objects.filter(student=student, date=today).order_by("-time").first()
+        existing_att = Attendance.objects.filter(student=student, date=today).first()
         if existing_att:
-            print("Attendance already marked today")
+            # Return existing attendance without modification
             return Response({
                 "message": "Attendance already marked today",
                 "name": student.name,
@@ -150,12 +120,9 @@ class MarkAttendance(APIView):
                 "class": student.class_group.name if student.class_group else None,
                 "batch": student.batch.name if student.batch else None,
                 "department": student.department.name if student.department else None,
-                # "time": existing_att.time.isoformat() if existing_att else None
-                "time": _local_time_iso(today, existing_att.time) if existing_att else None
-})
-        if Attendance.objects.filter(student=student, date=today).exists():
-            print("Attendance already marked today")
-            return Response({"message": "Attendance already marked today"})
+                "time": existing_att.time.isoformat() if existing_att.time else None,
+                "status": existing_att.status,
+            })
         
         if not student.face_encoding:
             print(f"Error: Student {student.roll_no} has no face encoding. Register via /register/ API or fix with management command.")
@@ -184,16 +151,27 @@ class MarkAttendance(APIView):
 
         if matched_student:
             today = timezone.localdate()
-            now_local = timezone.localtime(timezone.now(), NEPAL_TZ)
-            if Attendance.objects.filter(student=student, date=today).exists():
-                print("Attendance already marked today")
-                return Response({"message": "Attendance already marked today"})
-            # Store time explicitly in Nepal local time to avoid double conversions
+            now_time = timezone.localtime(timezone.now()).time()
+            
+            # Compute status based on time
+            CUTOFF_TIME = datetime_time(9, 0)
+            LATE_TIME = datetime_time(9, 30)
+            if now_time <= CUTOFF_TIME:
+                status = "on_time"
+            elif now_time <= LATE_TIME:
+                status = "late"
+            else:
+                status = "late"
+            
+            # Create attendance record
             attendance = Attendance.objects.create(
                 student=student,
                 date=today,
-                time=now_local.timetz(),
-            )  # <-- capture created record
+                time=now_time,
+                status=status,
+                already_marked=True,
+            )
+            
             try:
                 saved_path = save_attendance_image_from_path(path, roll_no)
                 logger.info(f"Saved attendance image to {saved_path}")
@@ -214,8 +192,8 @@ class MarkAttendance(APIView):
                 "class": student.class_group.name if student.class_group else None,
                 "batch": student.batch.name if student.batch else None,
                 "department": student.department.name if student.department else None,
-                # "time": attendance.time.isoformat() if attendance else None
-                "time": _now_local_iso()
+                "time": attendance.time.isoformat() if attendance.time else None,
+                "status": attendance.status,
             })
         else:
             print("Error: Face did not match")
@@ -322,33 +300,23 @@ class StudentAttendanceDetail(APIView):
         absent_days = len([d for d in all_dates if d not in present_dates]) if all_dates else 0
         total_days = len(all_dates) if all_dates else present_days
 
-        # Status breakdown with timezone-safe comparison
+        # Status breakdown - now use the status field directly from model
         status_counts = {"on_time": 0, "late": 0}
-        CUTOFF_TIME = datetime_time(9, 0)
-        LATE_TIME = datetime_time(9, 30)
-
-        def _naive_time(t):
-            return t.replace(tzinfo=None) if t and getattr(t, "tzinfo", None) else t
 
         for att in qs:
-            att_time = _naive_time(att.time)
-            if att_time:
-                if att_time <= CUTOFF_TIME:
-                    status_counts["on_time"] += 1
-                elif att_time <= LATE_TIME:
-                    status_counts["late"] += 1
-                else:
-                    status_counts["late"] += 1
+            if att.status == "on_time":
+                status_counts["on_time"] += 1
+            elif att.status == "late":
+                status_counts["late"] += 1
 
+        # Build records with id field for editing
         records = [
             {
+                "id": a.id,
+                "attendanceId": a.id,  # alias for compatibility
                 "date": a.date.isoformat(),
-                "time": (_naive_time(a.time).isoformat() if _naive_time(a.time) else None),
-                "status": (
-                    "on_time" if (_naive_time(a.time) and _naive_time(a.time) <= CUTOFF_TIME)
-                    else "late" if (_naive_time(a.time) and _naive_time(a.time) <= LATE_TIME)
-                    else "late" if a.time else "absent"
-                ),
+                "time": (a.time.isoformat() if a.time else None),
+                "status": a.status,
             }
             for a in qs.order_by("-date")
         ]

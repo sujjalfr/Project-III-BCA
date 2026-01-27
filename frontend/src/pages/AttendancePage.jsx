@@ -4,7 +4,9 @@ import QRScanner from "../components/QR/QRScanner";
 import ManualRollInput from "../components/common/ManualRollInput";
 import FaceScan from "../components/FaceScan/FaceScan";
 import AttendanceResult from "../components/Attendance/AttendanceResult";
-import { formatNPTOrDash } from "../utils/helpers";
+import { formatNPTOrDash, formatTimeForDisplay } from "../utils/helpers";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 const AttendancePage = () => {
   const [step, setStep] = useState("choose");
@@ -22,7 +24,7 @@ const AttendancePage = () => {
       if (autoScan) {
         try {
           const response = await fetch(
-            `http://127.0.0.1:8000/attendance/status?roll_no=${encodeURIComponent(
+            `${API_BASE}/api/attendanceStatus/?roll_no=${encodeURIComponent(
               data,
             )}`,
           );
@@ -60,7 +62,7 @@ const AttendancePage = () => {
       (async () => {
         try {
           const response = await fetch(
-            `http://127.0.0.1:8000/attendance/status?roll_no=${encodeURIComponent(
+            `${API_BASE}/api/attendanceStatus/?roll_no=${encodeURIComponent(
               roll,
             )}`,
           );
@@ -210,15 +212,14 @@ const AttendancePage = () => {
                     </div>
                     <div>
                       Time:{" "}
-                      {formatNPTOrDash(
+                      {formatTimeForDisplay(
                         lastAttendance.time ||
                         lastAttendance.timeIn ||
                         lastAttendance.timestamp
                       )}
                     </div>
                     <div>
-                      {console.log(lastAttendance)}
-                      Status: {lastAttendance.success ? "Success" : "Failed"}
+                      Status: {lastAttendance.success ? "✓ Marked" : "✗ Failed"}
                     </div>
                   </div>
                 )}

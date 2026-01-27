@@ -2,6 +2,8 @@ import React, { useRef, useState, useEffect } from "react";
 import Webcam from "react-webcam";
 import axios from "axios";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+
 const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
   const webcamRef = useRef(null);
   const processingRef = useRef(false);
@@ -45,7 +47,7 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
         formData.append("image", blob, "face.jpg");
 
         const resp = await axios.post(
-          "http://127.0.0.1:8000/attendance/",
+          `${API_BASE}/api/attendance/`,
           formData,
           {
             headers: { Accept: "application/json" },
@@ -92,7 +94,9 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
             return;
           }
           if (data?.error === "No face detected in image") {
-            // transient
+            // transient - keep scanning
+            processingRef.current = false;
+            setLoading(false);
             return;
           }
           if (!autoScan) {
@@ -103,6 +107,8 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
             });
           } else {
             console.warn("FaceScan (auto): unexpected 2xx payload", data);
+            processingRef.current = false;
+            setLoading(false);
           }
         } else {
           // non-2xx
@@ -112,7 +118,9 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
             resp.statusText ||
             `HTTP ${resp.status}`;
           if (errMsg === "No face detected in image") {
-            // transient
+            // transient - keep scanning
+            processingRef.current = false;
+            setLoading(false);
             return;
           }
           if (!autoScan) {
@@ -124,18 +132,19 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
               resp.status,
               errMsg,
             );
+            processingRef.current = false;
+            setLoading(false);
           }
         }
       } catch (err) {
         if (!autoScan) {
           setIsCapturing(false);
-          onResult({ success: false, error: "Network error" });
+          onResult({ success: false, error: "Network error: " + err.message });
         } else {
           console.warn("FaceScan (auto) network error:", err);
+          processingRef.current = false;
+          setLoading(false);
         }
-      } finally {
-        processingRef.current = false;
-        if (mountedRef.current) setLoading(false);
       }
     }, 1000);
 
@@ -153,8 +162,8 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
         screenshotFormat="image/jpeg"
         width={320}
         height={240}
-        videoconstraints={{ facingMode: "user" }}
-        style={{ width: "100%", transform: "scaleX(-1)"}}
+        videoConstraints={{ facingMode: "user" }}
+        style={{ width: "100%", transform: "scaleX(-1)" }}
         className="rounded-lg shadow mb-4"
       />
       {!isCapturing && !autoScan && (

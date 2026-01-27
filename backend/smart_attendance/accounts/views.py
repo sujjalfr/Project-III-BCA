@@ -7,7 +7,11 @@ from django.http import JsonResponse
 
 from rest_framework import generics, pagination, filters
 from django.db import models
-from .serializer import StudentSerializer
+from .serializers import StudentSerializer
+from rest_framework import viewsets, status
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def departments_list(request):
@@ -97,6 +101,7 @@ class StudentListView(generics.ListAPIView):
       - department (department id)
       - search (search string for name or roll)
     """
+    queryset = Student.objects.select_related('department', 'batch', 'class_group').order_by('-created_at')
     serializer_class = StudentSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [filters.SearchFilter]
@@ -120,14 +125,59 @@ class StudentListView(generics.ListAPIView):
         if dept:
             qs = qs.filter(department_id=dept)
         if search:
-            # SearchFilter will also apply, but allow explicit search
             qs = qs.filter(models.Q(name__icontains=search) | models.Q(roll_no__icontains=search))
 
         return qs
 
+    def list(self, request, *args, **kwargs):
+        """Override to add debugging and ensure proper response format"""
+        try:
+            queryset = self.filter_queryset(self.get_queryset())
+            print(f"DEBUG: Found {queryset.count()} students")
+            
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                return self.get_paginated_response(serializer.data)
+
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            logger.exception("Error in StudentListView.list: %s", e)
+            return Response(
+                {"error": f"Failed to fetch students: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class StudentDetailView(generics.RetrieveUpdateAPIView):
-    queryset = Student.objects.all()
+    queryset = Student.objects.select_related('department', 'batch', 'class_group').all()
     serializer_class = StudentSerializer
+    lookup_field = 'pk'
+    
+    def patch(self, request, *args, **kwargs):
+        """Handle PATCH for partial updates"""
+        return self.partial_update(request, *args, **kwargs)
+
+
+class StudentViewSet(viewsets.ModelViewSet):
+    queryset = Student.objects.select_related('department', 'batch', 'class_group').all()
+    serializer_class = StudentSerializer
+    
+    def partial_update(self, request, *args, **kwargs):
+        """Handle PATCH requests for student updates"""
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            
+            return Response(serializer.data)
+        except Exception as e:
+            logger.exception("Error updating student: %s", e)
+            return Response(
+                {"detail": f"Failed to update student: {str(e)}"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 

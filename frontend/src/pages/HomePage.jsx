@@ -1,29 +1,27 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import ChainedSelects from "../components/Admin/StudentManagement/ChainedSelects";
 import Sidebar from "../components/Admin/Sidebar";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { formatNPTOrDash } from "../utils/helpers";
 
-const API_BASE = import.meta.env.VITE_API_BASE;
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
-const KpiCard = ({ title, value, delta }) => (
+const KpiCard = ({ title, value, delta, subtitle }) => (
   <div
-    style={{
-      padding: 12,
-      borderRadius: 8,
-      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-      background: "#fff",
-      minWidth: 160,
-    }}
+    className="bg-white rounded-lg shadow-sm p-4 flex flex-col gap-1"
+    style={{ minWidth: 180 }}
   >
-    <div style={{ fontSize: 12, color: "#666" }}>{title}</div>
-    <div style={{ fontSize: 20, fontWeight: 600 }}>{value}</div>
+    <div className="text-xs text-gray-500">{title}</div>
+    <div className="text-2xl font-semibold">{value}</div>
     {delta !== undefined && (
-      <div style={{ fontSize: 12, color: delta >= 0 ? "#0a0" : "#c00" }}>
+      <div
+        className={`text-xs ${delta >= 0 ? "text-green-600" : "text-red-600"}`}
+      >
         {delta > 0 ? "▲" : "▼"} {Math.abs(delta)}%
       </div>
     )}
+    {subtitle && <div className="text-xs text-gray-400">{subtitle}</div>}
   </div>
 );
 
@@ -92,32 +90,43 @@ function HomePage() {
   // Add filters state
   const [filters, setFilters] = useState({ deptId: '', batchId: '', classGroupId: '' });
 
+  // Load students
   useEffect(() => {
     let mounted = true;
+    console.log(`Loading students from: ${API_BASE}/api/students/?page_size=1000`);
     axios
-      .get(`${API_BASE}/api/students/`)
+      .get(`${API_BASE}/api/students/?page_size=1000`)
       .then((r) => {
         if (!mounted) return;
+        console.log("Students loaded:", r.data);
+        const data = r.data.results || r.data || [];
         setStudents(
-          (r.data.results || []).map((d) => ({ ...d, id: String(d.id) })),
+          (Array.isArray(data) ? data : []).map((d) => ({ ...d, id: String(d.id) })),
         );
       })
-      .catch(() => setStudents([]));
+      .catch((err) => {
+        console.error("Failed to load students:", err);
+        setStudents([]);
+      });
     return () => {
       mounted = false;
     };
   }, []);
 
-  // Fetch data
+  // Load attendance statuses
   useEffect(() => {
     let mounted = true;
+    console.log(`Loading attendance from: ${API_BASE}/api/attendanceStatus/list/`);
     axios
       .get(`${API_BASE}/api/attendanceStatus/list/`)
       .then((r) => {
         if (!mounted) return;
-        setShowAttendanceStatus(
-          (r.data.results || []).map((d) => ({ ...d, id: String(d.id) })),
-        );
+        console.log("Attendance data loaded:", r.data);
+        const data = (r.data.results || []).map((d) => ({ 
+          ...d, 
+          id: String(d.id) 
+        }));
+        setShowAttendanceStatus(data);
       })
       .catch((err) => {
         console.error("Failed to fetch attendance status:", err);
@@ -127,70 +136,116 @@ function HomePage() {
       mounted = false;
     };
   }, []);
-  // useEffect(() => {
-  //   console.log("Attendance Status Updated:", showAttendanceStatus, students);
-  // }, [showAttendanceStatus, students]);
 
+  // Derive metrics from attendance data
   useEffect(() => {
     setLoading(true);
-    // Calculate metrics from attendance data
-    const calculateMetrics = () => {
-      if (showAttendanceStatus.length === 0 || students.length === 0) {
+    const timer = setTimeout(() => {
+      console.log("Calculating metrics...", { 
+        attendanceLength: showAttendanceStatus.length, 
+        studentsLength: students.length 
+      });
+      
+      if (!showAttendanceStatus.length) {
+        console.log("No attendance data");
         setMetrics(null);
         setLoading(false);
         return;
       }
 
-      // Count attendance statistics for today
-      const presentCount = showAttendanceStatus.filter(s => s.alreadyMarked).length;
-      const absentCount = showAttendanceStatus.filter(s => !s.alreadyMarked).length;
-      const lateCount = showAttendanceStatus.filter(s => s.status === 'late').length;
-      const onTimeCount = showAttendanceStatus.filter(s => s.status === 'on_time').length;
+      const presentCount = showAttendanceStatus.filter((s) => s.alreadyMarked).length;
+      const absentCount = showAttendanceStatus.filter((s) => !s.alreadyMarked).length;
+      const lateCount = showAttendanceStatus.filter((s) => s.status === "late").length;
+      const onTimeCount = showAttendanceStatus.filter(
+        (s) => s.status === "on_time",
+      ).length;
+      const total = showAttendanceStatus.length || 1;
+      const attendancePct = Math.round((presentCount / total) * 100);
 
-      const totalStudents = showAttendanceStatus.length || 1;
-      const attendancePercent = Math.round((presentCount / totalStudents) * 100);
+      const scansPerHour = Array.from(
+        { length: 24 },
+        (_, hour) =>
+          showAttendanceStatus.filter((s) => {
+            if (!s.time) return false;
+            try {
+              const scanTime = new Date(s.time);
+              return scanTime.getHours() === hour;
+            } catch {
+              return false;
+            }
+          }).length,
+      );
 
-      // Calculate scans per hour (mock distribution for today)
-      const now = new Date();
-      const scansPerHour = [];
-      for (let i = 0; i < 24; i++) {
-        const hour = i;
-        const hourScans = showAttendanceStatus.filter(s => {
-          if (!s.time) return false;
-          try {
-            const scanTime = new Date(s.time);
-            return scanTime.getHours() === hour;
-          } catch {
-            return false;
-          }
-        }).length;
-        scansPerHour.push(hourScans);
-      }
-
-      setMetrics({
-        attendance: attendancePercent,
-        attendanceDelta: attendancePercent >= 90 ? 2.5 : -1.2, // mock delta
+      const calculatedMetrics = {
+        attendancePct,
+        attendanceDelta: attendancePct >= 90 ? 2.5 : -1.2,
         activeStudents: presentCount,
-        totalStudents: totalStudents,
-        absentCount: absentCount,
-        lateCount: lateCount,
-        onTimeCount: onTimeCount,
-        scansPerHour: scansPerHour,
-      });
-      setLoading(false);
-    };
+        totalStudents: total,
+        absentCount,
+        lateCount,
+        onTimeCount,
+        scansPerHour,
+      };
 
-    const timer = setTimeout(() => {
-      calculateMetrics();
-    }, 300);
+      console.log("Metrics calculated:", calculatedMetrics);
+      setMetrics(calculatedMetrics);
+      setLastUpdated(new Date());
+      setLoading(false);
+    }, 200);
 
     return () => clearTimeout(timer);
-  }, [showAttendanceStatus, range]);
+  }, [showAttendanceStatus]);
+
+  const handleFilterChange = useCallback((values) => {
+    setFilters(values);
+  }, []);
+
+  const filteredRows = useMemo(() => {
+    return showAttendanceStatus
+      .map((s) => {
+        const student = students.find((st) => st.roll_no === s.roll_no);
+        return {
+          ...s,
+          displayName: student?.name || s.name || s.roll_no,
+          roll: student?.roll_no || s.roll_no,
+          className:
+            student?.class_group?.name || student?.class || s.class || "—",
+          departmentId: student?.department?.id,
+          batchId: student?.batch?.id,
+          classGroupId: student?.class_group?.id,
+        };
+      })
+      .filter((row) => {
+        if (showAbsentOnly && row.status !== "absent") return false;
+        if (showLateOnly && row.status !== "late") return false;
+        if (
+          search &&
+          !`${row.displayName} ${row.className}`
+            .toLowerCase()
+            .includes(search.toLowerCase())
+        ) {
+          return false;
+        }
+        if (
+          filters.deptId &&
+          String(row.departmentId || "") !== String(filters.deptId)
+        )
+          return false;
+        if (
+          filters.batchId &&
+          String(row.batchId || "") !== String(filters.batchId)
+        )
+          return false;
+        if (
+          filters.classGroupId &&
+          String(row.classGroupId || "") !== String(filters.classGroupId)
+        )
+          return false;
+        return true;
+      });
+  }, [showAttendanceStatus, students, showAbsentOnly, showLateOnly, search, filters]);
 
   const refresh = () => {
-    // replace with real fetch to update metrics + students:
-    // setLoading(true);
-    // fetch(`/api/admin/home-metrics?range=${range}`).then(r=>r.json()).then(data=>{ setMetrics(data.metrics); setStudents(data.students); setLastUpdated(new Date()); }).finally(()=>setLoading(false));
     setLoading(true);
     setTimeout(() => {
       setLastUpdated(new Date());
@@ -198,215 +253,151 @@ function HomePage() {
     }, 300);
   };
 
-  // Apply all filters together
-  const filtered = showAttendanceStatus.filter((s) => {
-    // Find corresponding student to get department/batch/class info
-    const student = students.find(st => st.roll_no === s.roll_no);
-    
-    // Status filters (absent/late)
-    if (showAbsentOnly && s.status !== "absent") return false;
-    if (showLateOnly && s.status !== "late") return false;
-    
-    // Search filter
-    if (search && !`${s.name} ${s.class || ''}`.toLowerCase().includes(search.toLowerCase())) {
-      return false;
-    }
-    
-    // Department/Batch/Class filters
-    if (student) {
-      if (filters.deptId && String(student.department?.id || '') !== String(filters.deptId)) {
-        return false;
-      }
-      if (filters.batchId && String(student.batch?.id || '') !== String(filters.batchId)) {
-        return false;
-      }
-      if (filters.classGroupId && String(student.class_group?.id || '') !== String(filters.classGroupId)) {
-        return false;
-      }
-    } else if (filters.deptId || filters.batchId || filters.classGroupId) {
-      // If filters are active but student not found, exclude this record
-      return false;
-    }
-    
-    return true;
-  });
-
-  const absentCount = metrics?.absentCount || 0;
-  const lateCount = metrics?.lateCount || 0;
-
-  // Memoize the filter change handler
-  const handleFilterChange = useCallback((filterValues) => {
-    setFilters(filterValues);
-  }, []);
-
   return (
-    <div style={{ padding: 20 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Admin HomePage</h2>
-        <div>
-          <button
-            onClick={() => navigate("/admin")}
-            className="mr-22 bg-red-600 p-2 rounded-md"
-          >
-            Admin Dashboard
-          </button>
-
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-            style={{ marginRight: 8 }}
-          >
-            <option value="24h">Last 24h</option>
-            <option value="7d">7 days</option>
-            <option value="30d">30 days</option>
-          </select>
-          <button onClick={refresh} style={{ marginRight: 8 }}>
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </div>
-
-      <div
-        style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}
-      >
-        <KpiCard
-          title="Attendance %"
-          value={metrics ? `${metrics.attendance}%` : "—"}
-          delta={metrics ? metrics.attendanceDelta : undefined}
-        />
-        <KpiCard
-          title="Active Students"
-          value={metrics ? metrics.activeStudents : "—"}
-        />
-        <KpiCard title="Absent" value={absentCount} />
-        <KpiCard title="Late arrivals" value={lateCount} />
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            background: "#fff",
-            minWidth: 260,
-          }}
-        >
-          <div style={{ fontSize: 12, color: "#666" }}>Scans / hour (today)</div>
-          {metrics ? (
-            <Sparkline points={metrics.scansPerHour.slice(6, 18)} width={220} height={40} />
-          ) : (
-            <div style={{ height: 30 }} />
-          )}
-          <div style={{ fontSize: 10, color: "#999", marginTop: 4 }}>
-            Total scans: {metrics ? metrics.scansPerHour.reduce((a, b) => a + b, 0) : 0}
+    <div className="flex">
+      <div className="flex-1 p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">Admin HomePage</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/admin")}
+              className="bg-gray-100 px-3 py-2 rounded border"
+            >
+              Admin Dashboard
+            </button>
+            <select
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+              className="border rounded px-2 py-1"
+            >
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+            <button onClick={refresh} className="px-3 py-2 border rounded">
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
           </div>
         </div>
-      </div>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 8,
-        }}
-      >
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <ChainedSelects
-            onChange={handleFilterChange}
+        <div className="flex flex-wrap gap-4 items-stretch">
+          <KpiCard
+            title="Attendance %"
+            value={metrics ? `${metrics.attendancePct}%` : "—"}
+            delta={metrics ? metrics.attendanceDelta : undefined}
+            subtitle={loading ? "Loading…" : "Today"}
           />
-          <label style={{ fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={showAbsentOnly}
-              onChange={(e) => {
-                setShowAbsentOnly(e.target.checked);
-                if (e.target.checked) setShowLateOnly(false);
-              }}
-            />{" "}
-            Show absent
-          </label>
-          <label style={{ fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={showLateOnly}
-              onChange={(e) => {
-                setShowLateOnly(e.target.checked);
-                if (e.target.checked) setShowAbsentOnly(false);
-              }}
-            />{" "}
-            Show late
-          </label>
-          <input
-            placeholder="Search name or class"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{
-              padding: "6px 8px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-            }}
+          <KpiCard
+            title="Active Students"
+            value={metrics ? metrics.activeStudents : "—"}
+            subtitle={metrics ? `of ${metrics.totalStudents}` : "—"}
           />
-        </div>
-
-        <div style={{ fontSize: 12, color: "#666" }}>
-          {lastUpdated
-            ? `Updated ${Math.round((Date.now() - lastUpdated.getTime()) / 60000)}m ago`
-            : "Loading..."}
-        </div>
-      </div>
-
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 8,
-          padding: 12,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-        }}
-      >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr
-              style={{
-                textAlign: "left",
-                fontSize: 13,
-                color: "#374151",
-                borderBottom: "1px solid #e5e7eb",
-              }}
-            >
-              <th style={{ padding: "8px 6px" }}>Student</th>
-              <th style={{ padding: "8px 6px", width: 120 }}>Class</th>
-              <th style={{ padding: "8px 6px", width: 120 }}>Status</th>
-              <th style={{ padding: "8px 6px", width: 120 }}>Time In</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={4} style={{ padding: 12, color: "#6b7280" }}>
-                  No students match filters.
-                </td>
-              </tr>
+          <KpiCard
+            title="Absent"
+            value={metrics ? metrics.absentCount : "—"}
+          />
+          <KpiCard
+            title="Late arrivals"
+            value={metrics ? metrics.lateCount : "—"}
+          />
+          <div className="bg-white p-4 rounded-lg shadow-sm flex-1 min-w-[300px]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700">
+                  Scans / hour (today)
+                </h3>
+                <div className="text-xl font-bold text-gray-900">
+                  {metrics
+                    ? metrics.scansPerHour.reduce((a, b) => a + b, 0)
+                    : 0}
+                </div>
+              </div>
+              <div className="text-xs text-gray-500 text-right">
+                {lastUpdated
+                  ? `Updated ${Math.round((Date.now() - lastUpdated.getTime()) / 60000)}m ago`
+                  : ""}
+              </div>
+            </div>
+            {metrics ? (
+              <Sparkline points={metrics.scansPerHour.slice(6, 18)} width={220} height={40} />
+            ) : (
+              <div className="h-12 flex items-center justify-center text-xs text-gray-400">Loading chart…</div>
             )}
-            {filtered.map((s) => (
-              <tr key={s.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                <td style={{ padding: "10px 6px" }}>{s.name}</td>
-                <td style={{ padding: "10px 6px" }}>{s.class}</td>
-                <td style={{ padding: "10px 6px" }}>
-                  <StatusBadge status={s.status} />
-                </td>
-                <td style={{ padding: "10px 6px" }}>
-                  {formatNPTOrDash(s.time)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-lg shadow-sm space-y-3">
+          <div className="flex flex-wrap items-center gap-3 justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <ChainedSelects onChange={handleFilterChange} />
+              <label className="text-sm text-gray-700 flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={showAbsentOnly}
+                  onChange={(e) => {
+                    setShowAbsentOnly(e.target.checked);
+                    if (e.target.checked) setShowLateOnly(false);
+                  }}
+                />
+                Show absent
+              </label>
+              <label className="text-sm text-gray-700 flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={showLateOnly}
+                  onChange={(e) => {
+                    setShowLateOnly(e.target.checked);
+                    if (e.target.checked) setShowAbsentOnly(false);
+                  }}
+                />
+                Show late
+              </label>
+              <input
+                placeholder="Search name or class"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="border rounded px-3 py-2"
+              />
+            </div>
+            <div className="text-xs text-gray-500">
+              {lastUpdated
+                ? `Updated ${Math.round((Date.now() - lastUpdated.getTime()) / 60000)}m ago`
+                : "Loading…"}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600 border-b">
+                  <th className="p-2">Student</th>
+                  <th className="p-2">Class</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Time In</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-3 text-center text-gray-500">
+                      No students match filters.
+                    </td>
+                  </tr>
+                )}
+                {filteredRows.map((row) => (
+                  <tr key={row.id} className="border-b hover:bg-gray-50">
+                    <td className="p-2">{row.displayName}</td>
+                    <td className="p-2">{row.className}</td>
+                    <td className="p-2">
+                      <StatusBadge status={row.status} />
+                    </td>
+                    <td className="p-2">{formatNPTOrDash(row.time)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   );

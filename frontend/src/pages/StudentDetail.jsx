@@ -3,7 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import Sidebar from "../components/Admin/Sidebar";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+// Threshold for being considered on-time (HH:MM). Adjust as needed.
+const LATE_THRESHOLD = "09:15";
 
 function formatDate(date) {
   if (!date) return "";
@@ -30,6 +32,27 @@ function formatTimeForDisplay(value) {
   } catch {
     return value;
   }
+}
+
+function computeStatusFromTime(hhmm) {
+  // Determine attendance status from time string (HH:MM).
+  // Returns 'absent' | 'on_time' | 'late'
+  if (!hhmm) return "absent";
+  if (!/^\d{2}:\d{2}$/.test(hhmm)) return "absent";
+  const [h1, m1] = hhmm.split(":").map((v) => Number(v));
+  const [h2, m2] = String(LATE_THRESHOLD)
+    .split(":")
+    .map((v) => Number(v));
+  if (
+    Number.isNaN(h1) ||
+    Number.isNaN(m1) ||
+    Number.isNaN(h2) ||
+    Number.isNaN(m2)
+  ) {
+    return "absent";
+  }
+  if (h1 < h2 || (h1 === h2 && m1 <= m2)) return "on_time";
+  return "late";
 }
 
 /**
@@ -83,28 +106,47 @@ export default function StudentDetail() {
       setLoading(true);
       setError("");
       try {
+        console.log(`Fetching students from: ${API_BASE}/api/students/?page_size=1000`);
         const [sr, ar] = await Promise.all([
           axios.get(`${API_BASE}/api/students/?page_size=1000`),
-          axios.get(`${API_BASE}/api/attendanceStatus/list/`),
+          axios.get(`${API_BASE}/api/attendanceStatus/list/`).catch(e => {
+            console.warn("AttendanceStatusList failed, continuing anyway:", e);
+            return { data: { results: [] } };
+          }),
         ]);
-        const students = sr?.data?.results || [];
+        
+        console.log("Students response:", sr.data);
+        console.log("Attendance response:", ar.data);
+        
+        // Handle both paginated and non-paginated responses
+        const students = sr?.data?.results || sr?.data || [];
+        console.log(`Total students fetched: ${students.length}`);
+        console.log("Student roll numbers:", students.map(s => s.roll_no));
+        
         const found = students.find(
-          (s) => String(s.roll_no) === String(rollNo),
+          (s) => String(s.roll_no).trim() === String(rollNo).trim(),
         );
+        
         if (!found) {
-          setError("Student not found");
+          console.log(`Student with rollNo "${rollNo}" not found in:`, students.map(s => `"${s.roll_no}"`));
+          setError(`Student with roll number "${rollNo}" not found. Available: ${students.slice(0, 5).map(s => s.roll_no).join(', ')}${students.length > 5 ? '...' : ''}`);
           setStudent(null);
           setAttendance(null);
         } else {
+          console.log("Student found:", found);
           setStudent(found);
           const allAtt = ar?.data?.results || [];
           const todayAtt =
-            allAtt.find((a) => String(a.roll_no) === String(rollNo)) || null;
+            allAtt.find((a) => String(a.roll_no).trim() === String(rollNo).trim()) || null;
           setAttendance(todayAtt);
+          setError("");
         }
       } catch (e) {
-        console.error(e);
-        setError("Failed to load student data");
+        console.error("Failed to load student/attendance data:", e);
+        const errorMsg = e?.response?.data?.error || e?.response?.data?.detail || e?.message || "Failed to load student data. Please check server connection.";
+        setError(`Error: ${errorMsg}`);
+        setStudent(null);
+        setAttendance(null);
       } finally {
         setLoading(false);
       }
@@ -176,7 +218,7 @@ export default function StudentDetail() {
             batch_id: String(c.batch_id || ""),
           })),
         );
-      } catch (e) {
+      } catch {
         if (!mounted) return;
         setAllDepartments([]);
         setAllBatches([]);
@@ -221,12 +263,13 @@ export default function StudentDetail() {
     return filtered;
   }, [deptId, batchId, allClassGroups]);
 
-  // Helper: build datetime payload string expected by backend
-  function buildDateTimePayload(datePart, hhmm) {
-    // datePart expected as YYYY-MM-DD, hhmm as HH:MM
-    if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
-    const date = datePart || new Date().toISOString().slice(0, 10);
-    return `${date}T${hhmm}:00`;
+  // Helper: build time-only payload string expected by backend (HH:MM:SS)
+  function buildTimeOnly(hhmm) {
+    // hhmm as HH:MM from time input
+    if (!hhmm) return null;
+    // Ensure it matches HH:MM format
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) return null;
+    return `${String(hhmm)}:00`;
   }
 
   // --- Save student + today's attendance changes ---
@@ -235,54 +278,56 @@ export default function StudentDetail() {
     setLoading(true);
     setError("");
     try {
-      // Update student
+      // Update student - use _id suffix for FK fields
       await axios.patch(`${API_BASE}/api/students/${student.id}/`, {
         name: student.name,
         roll_no: student.roll_no,
-        department: deptId || null,
-        batch: batchId || null,
-        class_group: classGroupId || null,
+        department_id: deptId || null,
+        batch_id: batchId || null,
+        class_group_id: classGroupId || null,
       });
 
       // Update today's attendance if present and attForm exists
-      if (attendance?.id && attForm) {
-        let payloadTime = null;
-        if (attForm.time) {
-          // attForm.time is HH:MM from time input -> convert to full datetime using today's date
-          payloadTime = buildDateTimePayload(
-            new Date().toISOString().slice(0, 10),
-            attForm.time,
-          );
-        }
-
+      if (attendance?.id && attForm?.time) {
         try {
+          // attForm.time is HH:MM from time input -> convert to HH:MM:SS
+          const payloadTime = buildTimeOnly(attForm.time);
+          if (!payloadTime) {
+            setError("Invalid time format");
+            setLoading(false);
+            return;
+          }
+
           const resp = await axios.patch(
             `${API_BASE}/api/attendance/${attendance.id}/`,
             {
-              status: attForm.status,
-              time: payloadTime || null,
+              time: payloadTime,
+              alreadyMarked: !!attForm.alreadyMarked,
             },
           );
-          // Update local today's attendance with returned values if any
+
+          // Update local today's attendance with returned values
           setAttendance((prev) =>
             prev
               ? {
                   ...prev,
-                  status: resp.data.status ?? attForm.status,
-                  time: resp.data.time ?? payloadTime,
+                  status: resp?.data?.status ?? computeStatusFromTime(attForm.time),
+                  time: resp?.data?.time ?? payloadTime,
+                  alreadyMarked: resp?.data?.alreadyMarked ?? !!attForm.alreadyMarked,
                 }
               : prev,
           );
-        } catch (e) {
-          console.warn("Attendance PATCH failed.", e);
-          setError("Attendance save failed.");
+        } catch (err) {
+          console.warn("Attendance PATCH failed.", err);
+          const msg = err?.response?.data?.detail || err?.message || "Attendance save failed.";
+          setError(typeof msg === "string" ? msg : JSON.stringify(msg));
         }
       }
 
       setIsEditing(false);
     } catch (e) {
       console.error("Save failed", e);
-      setError("Save failed. Endpoint may be unavailable.");
+      setError("Save failed. Check console for details.");
     } finally {
       setLoading(false);
     }
@@ -290,8 +335,15 @@ export default function StudentDetail() {
 
   const imageUrl = useMemo(() => {
     if (!student?.image) return "https://i.pravatar.cc/80?img=1";
-    return `${API_BASE}/media/${student.image}`;
-  }, [student]);
+    // Ensure we have proper URL - handle both relative and absolute paths
+    const imagePath = student.image;
+    // If it's already a full URL, use it as is
+    if (imagePath.startsWith('http')) {
+      return imagePath;
+    }
+    // Otherwise, prepend API_BASE
+    return `${API_BASE}/media/${imagePath}`;
+  }, [student?.image]);
 
   // --- Edit a historical attendance record: prepare editing state ---
   const handleEditAttendance = (record) => {
@@ -303,12 +355,15 @@ export default function StudentDetail() {
     // set editingDate (use record.date if present)
     setEditingDate(record.date || "");
 
-    // derive HH:MM for editingTime
+    // derive HH:MM for editingTime from the stored time
     if (record.time) {
       const displayed = formatTimeForDisplay(record.time);
-      // ensure it's HH:MM
-      if (/^\d{2}:\d{2}$/.test(displayed)) setEditingTime(displayed);
-      else setEditingTime("");
+      // ensure it's HH:MM for time input
+      if (/^\d{2}:\d{2}$/.test(displayed)) {
+        setEditingTime(displayed);
+      } else {
+        setEditingTime("");
+      }
     } else {
       setEditingTime("");
     }
@@ -317,10 +372,17 @@ export default function StudentDetail() {
 
   // --- Save edited historical attendance time ---
   const handleSaveAttendance = async () => {
-    if (!editingAttendanceId || !editingTime) {
-      setEditError("Please select a valid time");
+    if (!editingAttendanceId) {
+      setEditError("Error: No attendance record selected");
       return;
     }
+
+    if (!editingTime) {
+      setEditError("Please enter a time (HH:MM)");
+      return;
+    }
+
+    // Validate HH:MM format
     if (!/^\d{2}:\d{2}$/.test(editingTime)) {
       setEditError("Time must be in HH:MM format");
       return;
@@ -336,20 +398,21 @@ export default function StudentDetail() {
       m < 0 ||
       m > 59
     ) {
-      setEditError("Invalid time");
+      setEditError("Invalid time (hours: 0-23, minutes: 0-59)");
       return;
     }
 
     try {
       setEditError("");
-      const payloadTime = buildDateTimePayload(
-        editingDate || new Date().toISOString().slice(0, 10),
-        editingTime,
-      );
+      // Convert HH:MM to HH:MM:SS for backend
+      const payloadTime = `${editingTime}:00`;
 
       const resp = await axios.patch(
         `${API_BASE}/api/attendance/${editingAttendanceId}/`,
-        { time: payloadTime },
+        { 
+          time: payloadTime,
+          status: "on_time" // Will be auto-computed by backend
+        },
         { headers: { "Content-Type": "application/json" } },
       );
 
@@ -358,7 +421,11 @@ export default function StudentDetail() {
         const updated = attendanceDetails.records.map((r) => {
           const rid = r.id || r.attendanceId || r.attendance_id;
           if (String(rid) === String(editingAttendanceId)) {
-            return { ...r, time: resp.data.time ?? payloadTime };
+            return { 
+              ...r, 
+              time: resp.data.time ?? payloadTime,
+              status: resp.data.status ?? "on_time"
+            };
           }
           return r;
         });
@@ -368,11 +435,15 @@ export default function StudentDetail() {
       // If this record is today's attendance summary object, update that too
       if (attendance && String(attendance.id) === String(editingAttendanceId)) {
         setAttendance((prev) =>
-          prev ? { ...prev, time: resp.data.time ?? payloadTime } : prev,
+          prev ? { 
+            ...prev, 
+            time: resp.data.time ?? payloadTime,
+            status: resp.data.status ?? "on_time"
+          } : prev,
         );
       }
 
-      // clear editing state
+      // Clear editing state
       setEditingAttendanceId(null);
       setEditingTime("");
       setEditingDate("");
@@ -382,11 +453,13 @@ export default function StudentDetail() {
       const errMsg =
         err?.response?.data?.time?.[0] ||
         err?.response?.data?.detail ||
+        err?.message ||
         "Failed to update attendance";
-      setEditError(errMsg);
+      setEditError(typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg));
     }
   };
 
+  // --- Cancel editing ---
   const handleCancelEdit = () => {
     setEditingAttendanceId(null);
     setEditingTime("");
@@ -445,14 +518,19 @@ export default function StudentDetail() {
           {!rollNo && (
             <div className="bg-white p-4 rounded shadow">
               <div className="text-sm text-gray-600 mb-2">
-                Enter roll number to view
+                Enter roll number to view student details
               </div>
               <div className="flex gap-2">
                 <input
                   value={inputRoll}
                   onChange={(e) => setInputRoll(e.target.value)}
-                  placeholder="Roll No"
-                  className="border px-3 py-2 rounded"
+                  onKeyPress={(e) => {
+                    if (e.key === "Enter" && inputRoll) {
+                      navigate(`/admin/student/${String(inputRoll).trim()}`);
+                    }
+                  }}
+                  placeholder="e.g., 201, BIT-2081"
+                  className="border px-3 py-2 rounded flex-1"
                 />
                 <button
                   onClick={() =>
@@ -471,9 +549,19 @@ export default function StudentDetail() {
             <>
               <div className="bg-white p-6 rounded shadow">
                 {loading ? (
-                  <div className="text-gray-500 text-sm">Loading…</div>
+                  <div className="text-gray-500 text-sm">Loading student data…</div>
                 ) : error ? (
-                  <div className="text-red-600 text-sm">{error}</div>
+                  <div className="bg-red-50 text-red-700 text-sm p-4 rounded border border-red-200">
+                    <strong>Error:</strong> {error}
+                    <div className="mt-2 text-xs">
+                      <p>Make sure:</p>
+                      <ul className="list-disc pl-5 mt-1">
+                        <li>Backend server is running on {API_BASE}</li>
+                        <li>The student with roll number "{rollNo}" exists in the database</li>
+                        <li>API endpoint `/api/students/` is accessible</li>
+                      </ul>
+                    </div>
+                  </div>
                 ) : student ? (
                   <div className="space-y-4">
                     <div className="flex gap-4 items-center">
@@ -482,6 +570,7 @@ export default function StudentDetail() {
                         alt="avatar"
                         className="w-24 h-24 rounded-lg object-cover bg-gray-100"
                         onError={(e) => {
+                          console.error("Image failed to load:", imageUrl);
                           e.target.src = "https://i.pravatar.cc/80?img=1";
                         }}
                       />
@@ -625,25 +714,16 @@ export default function StudentDetail() {
                           No attendance record for today.
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
                           <div>
                             <label className="text-xs text-gray-500">
                               Status
                             </label>
-                            <select
-                              className="w-full border rounded px-2 py-1"
-                              value={attForm?.status || "absent"}
-                              onChange={(e) =>
-                                setAttForm((f) => ({
-                                  ...f,
-                                  status: e.target.value,
-                                }))
-                              }
-                            >
-                              <option value="absent">Absent</option>
-                              <option value="late">Late</option>
-                              <option value="on_time">On time</option>
-                            </select>
+                            <div className="w-full border rounded px-2 py-1 bg-gray-100 text-sm">
+                              {attForm
+                                ? computeStatusFromTime(attForm.time)
+                                : "absent"}
+                            </div>
                           </div>
                           <div>
                             <label className="text-xs text-gray-500">
@@ -675,21 +755,6 @@ export default function StudentDetail() {
                             <span className="text-xs text-gray-500">
                               Already Marked
                             </span>
-                          </div>
-                          <div>
-                            <label className="text-xs text-gray-500">
-                              Class
-                            </label>
-                            <input
-                              className="w-full border rounded px-2 py-1"
-                              value={attForm?.class || ""}
-                              onChange={(e) =>
-                                setAttForm((f) => ({
-                                  ...f,
-                                  class: e.target.value,
-                                }))
-                              }
-                            />
                           </div>
                         </div>
                       )}
@@ -831,35 +896,39 @@ export default function StudentDetail() {
                                     </td>
                                     <td className="px-4 py-3 font-mono text-gray-700">
                                       {isThisEditing ? (
-                                        <div className="flex items-center gap-2">
-                                          <input
-                                            type="time"
-                                            value={editingTime}
-                                            onChange={(e) =>
-                                              setEditingTime(e.target.value)
-                                            }
-                                            className="border rounded px-2 py-1"
-                                          />
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <div className="flex items-center gap-1">
+                                            <label className="text-xs text-gray-600">Time:</label>
+                                            <input
+                                              type="time"
+                                              value={editingTime}
+                                              onChange={(e) =>
+                                                setEditingTime(e.target.value)
+                                              }
+                                              className="border rounded px-2 py-1 text-sm"
+                                              placeholder="HH:MM"
+                                            />
+                                          </div>
                                           <button
                                             onClick={handleSaveAttendance}
-                                            className="px-2 py-1 bg-green-600 text-white rounded text-xs"
+                                            className="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
                                           >
                                             Save
                                           </button>
                                           <button
                                             onClick={handleCancelEdit}
-                                            className="px-2 py-1 border rounded text-xs"
+                                            className="px-2 py-1 border rounded text-xs hover:bg-gray-100"
                                           >
                                             Cancel
                                           </button>
                                           {editError && (
-                                            <div className="text-xs text-red-600">
+                                            <div className="text-xs text-red-600 w-full">
                                               {editError}
                                             </div>
                                           )}
                                         </div>
                                       ) : (
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-3">
                                           <span>
                                             {record.time
                                               ? formatTimeForDisplay(
@@ -867,6 +936,15 @@ export default function StudentDetail() {
                                                 )
                                               : "—"}
                                           </span>
+                                          <button
+                                            onClick={() => {
+                                              setEditingDate(record.date || "");
+                                              handleEditAttendance(record);
+                                            }}
+                                            className="px-2 py-1 border rounded text-xs hover:bg-blue-50"
+                                          >
+                                            Edit
+                                          </button>
                                         </div>
                                       )}
                                     </td>
