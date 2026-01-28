@@ -6,9 +6,9 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
         const v = localStorage.getItem("admin_sidebar_collapsed");
-        return v === null ? true : v === "true";
+        return v === null ? false : v === "true";
     } catch (e) {
-        return true;
+        return false;
     }
   });
 
@@ -26,15 +26,14 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
       if (ref.current.contains(e.target)) return;
 
       const isDesktop = window.innerWidth >= 768;
-      // On mobile (not desktop) always close when clicking outside.
-      // On desktop only close when the sidebar is expanded (not icon-only).
-      if (!isDesktop || !collapsed) onClose();
+      // On mobile close when clicking outside
+      if (!isDesktop) onClose();
     }
 
     function handleKey(e) {
       if (e.key !== "Escape") return;
       const isDesktop = window.innerWidth >= 768;
-      if (!isDesktop || !collapsed) onClose();
+      if (!isDesktop) onClose();
     }
 
     document.addEventListener("mousedown", handleOutsideClick);
@@ -43,39 +42,37 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
       document.removeEventListener("mousedown", handleOutsideClick);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [open, onClose]);
+  }, [open, onClose, collapsed]);
 
-  // When closing, ensure no focused element remains inside the hidden sidebar
-  useEffect(() => {
-    if (!open && ref.current) {
-      const active = document.activeElement;
-      if (active && ref.current.contains(active)) {
-        try {
-          active.blur();
-        } catch {}
-      }
+  // Handle expanding sidebar on click when collapsed
+  const handleSidebarClick = (e) => {
+    // Only expand if clicking on the sidebar itself, not on interactive elements
+    if (collapsed && e.target === e.currentTarget) {
+      setCollapsed(false);
     }
-  }, [open]);
+  };
 
   return (
     <aside
       ref={ref}
-      onClick={() => {
-        if (collapsed) setCollapsed(false);
+      onClick={handleSidebarClick}
+      style={{ 
+        pointerEvents: open ? 'auto' : 'none',
+        visibility: open ? 'visible' : 'hidden',
       }}
       className={`fixed inset-y-0 left-0 bg-gray-800 text-white transform h-screen ${
         open ? "translate-x-0" : "-translate-x-full"
-      } md:translate-x-0 ${collapsed ? "w-16" : "w-64"} transition-[width,transform] duration-300 z-40 md:z-auto md:static overflow-hidden`}
-      // Removed aria-hidden; use inert to prevent focus when closed
-      inert={!open}
+      } md:translate-x-0 md:visible md:pointer-events-auto ${collapsed ? "w-16" : "w-64"} transition-[width,transform] duration-300 z-40 md:z-auto md:static overflow-hidden flex flex-col`}
+      aria-label="Sidebar navigation"
+      aria-hidden={!open}
     >
       <div className="p-4 flex items-center justify-between">
-        {/* <h2 className="text-lg font-semibold">Admin</h2> */}
+        <h2 className={`text-lg font-semibold transition-opacity ${collapsed ? "opacity-0" : "opacity-100"}`}>
+          Admin
+        </h2>
         <button
           onClick={(e) => {
             e.stopPropagation();
-            // when expanded, allow closing on the close button
-            if (!collapsed) setCollapsed(true);
             onClose();
           }}
           className="md:hidden px-2 py-1 rounded hover:bg-gray-700"
@@ -85,24 +82,25 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
         </button>
       </div>
 
-      <nav className="mt-4 px-2">
+      <nav className="mt-4 px-2 flex-1 overflow-y-auto">
         {[
-          { to: "/admin", label: "Overview", icon: "M3 12h18" },
-          { to: "/admin/students", label: "Students", icon: "M3 6h18M3 12h18M3 18h18" },
-          { to: "/admin/student", label: "Student Detail", icon: "M2 12h20M12 2v20" },
-          { to: "/admin/settings", label: "Settings", icon: "M12 8a4 4 0 100 8 4 4 0 000-8z" },
+          { to: "/admin", label: "Overview", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
+          { to: "/admin/students", label: "Students", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
+          { to: "/admin/student", label: "Student Detail", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
+          { to: "/admin/settings", label: "Settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
         ].map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={(e) => e.stopPropagation()}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded ${isActive ? "bg-gray-700" : "hover:bg-gray-700"}`
+              `flex items-center gap-3 px-3 py-2 rounded mb-1 transition-colors ${
+                isActive ? "bg-gray-700" : "hover:bg-gray-700"
+              }`
             }
-            title={item.label}
-            // Prevent focus when sidebar is closed
-            tabIndex={open ? 0 : -1}
+            title={collapsed ? item.label : undefined}
           >
-            <span className="w-6 h-6 flex items-center justify-center">
+            <span className="w-6 h-6 flex items-center justify-center flex-shrink-0">
               <svg
                 className="w-5 h-5"
                 fill="none"
@@ -113,24 +111,31 @@ export default function Sidebar({ open = true, onClose = () => {} }) {
                 <path d={item.icon} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </span>
-            <span className={`${collapsed ? "hidden" : "inline"}`}>{item.label}</span>
+            <span className={`transition-opacity whitespace-nowrap ${collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"}`}>
+              {item.label}
+            </span>
           </NavLink>
         ))}
-                
-        <div className="mt-4 px-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setCollapsed((c) => !c);
-            }}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-gray-700"
-            aria-pressed={!collapsed}
-          >
-            <span className="w-6 h-6 flex items-center justify-center">{collapsed ? "»" : "«"}</span>
-            <span className={`${collapsed ? "hidden" : "inline"}`}>Collapse</span>
-          </button>
-        </div>
       </nav>
+                
+      <div className="mt-auto p-2 border-t border-gray-700">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setCollapsed((c) => !c);
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <span className="w-6 h-6 flex items-center justify-center flex-shrink-0">
+            {collapsed ? "»" : "«"}
+          </span>
+          <span className={`transition-opacity whitespace-nowrap ${collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"}`}>
+            Collapse
+          </span>
+        </button>
+      </div>
     </aside>
   );
 }

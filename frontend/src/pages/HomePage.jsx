@@ -81,6 +81,31 @@ function HomePage() {
   const [range, setRange] = useState("7d");
   const [lastUpdated, setLastUpdated] = useState(null);
   const navigate = useNavigate();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  // enforce admin auth for HomePage
+  useEffect(() => {
+    (async () => {
+      try {
+        // Fast-path: allow session flag set by AttendancePage after successful PIN entry
+        const sessionOk = sessionStorage.getItem("admin_authenticated") === "1";
+        if (sessionOk) return;
+
+        // Otherwise validate server token
+        const token = localStorage.getItem("admin_token");
+        if (!token) return navigate("/");
+        const r = await fetch(`${API_BASE}/api/admin/auth/validate/`, {
+          method: "GET",
+          headers: { "X-Admin-Token": token },
+        });
+        if (!r.ok) return navigate("/");
+        const jd = await r.json();
+        if (!jd.valid) return navigate("/");
+      } catch (e) {
+        return navigate("/");
+      }
+    })();
+  }, [navigate]);
 
   // filters
   const [showAbsentOnly, setShowAbsentOnly] = useState(false);
@@ -253,6 +278,15 @@ function HomePage() {
     }, 300);
   };
 
+  function performLogout() {
+    try {
+      sessionStorage.removeItem("admin_authenticated");
+      localStorage.removeItem("admin_token");
+    } catch (e) {}
+    setShowLogoutConfirm(false);
+    navigate("/");
+  }
+
   return (
     <div className="flex">
       <div className="flex-1 p-6 space-y-6">
@@ -265,6 +299,23 @@ function HomePage() {
             >
               Admin Dashboard
             </button>
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              className="bg-red-100 text-red-700 px-3 py-2 rounded border"
+            >
+              Logout
+            </button>
+            {showLogoutConfirm && (
+              <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                <div className="bg-white p-4 rounded shadow w-80">
+                  <div className="mb-3 font-medium">Confirm logout?</div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setShowLogoutConfirm(false)} className="px-3 py-1 border rounded">Cancel</button>
+                    <button onClick={performLogout} className="px-3 py-1 bg-red-600 text-white rounded">Logout</button>
+                  </div>
+                </div>
+              </div>
+            )}
             <select
               value={range}
               onChange={(e) => setRange(e.target.value)}

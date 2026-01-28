@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .utils.face_utils import match_face
 from accounts.models import Student
-from .models import Attendance
+from .models import Attendance, AdminSetting, AdminToken
 from django.utils import timezone
 import os
 from django.db.models import Count
@@ -15,6 +15,8 @@ from datetime import time as datetime_time
 
 from .utils.image_store import save_attendance_image_from_path
 from django.conf import settings
+from django.contrib.auth.hashers import make_password, check_password
+import secrets
 import logging
 logger = logging.getLogger(__name__)
 
@@ -350,3 +352,101 @@ class AttendanceUpdateAPIView(generics.RetrieveUpdateAPIView):
                 {"detail": f"Failed to update attendance: {str(e)}"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+class AdminAuthAPIView(APIView):
+    """
+    POST /api/admin/auth/
+    Body: { "pin": "12345" }
+    Returns: { "token": "<key>" } on success or 400 on failure.
+    """
+    def post(self, request):
+        pin = request.data.get("pin", "")
+        if not pin or not isinstance(pin, str):
+            return Response({"error": "pin required"}, status=400)
+
+        setting = AdminSetting.objects.first()
+        if not setting or not setting.pin_hash:
+            return Response({"error": "Admin PIN not set"}, status=400)
+
+        if not check_password(pin, setting.pin_hash):
+            return Response({"error": "Invalid PIN"}, status=400)
+
+        key = secrets.token_hex(32)
+        token = AdminToken.objects.create(key=key)
+        return Response({"token": token.key})
+
+class AdminAuthValidateAPIView(APIView):
+    """
+    GET /api/admin/auth/validate/
+    Header: X-Admin-Token: <token>
+    Returns: { "valid": true } or { "valid": false }
+    """
+    def get(self, request):
+        token_key = request.headers.get("X-Admin-Token") or request.query_params.get("token")
+        if not token_key:
+            return Response({"valid": False}, status=401)
+        try:
+            token = AdminToken.objects.get(key=token_key)
+        except AdminToken.DoesNotExist:
+            return Response({"valid": False}, status=401)
+        if token.is_expired():
+            token.delete()
+            return Response({"valid": False}, status=401)
+        return Response({"valid": True})
+
+class AdminPinAPIView(APIView):
+    """
+    POST /api/admin/pin/
+    Body: { "current_pin": "...", "pin": "new5digits" }
+    If a PIN already exists, current_pin must match.
+    """
+    def post(self, request):
+        new_pin = request.data.get("pin", "")
+        current_pin = request.data.get("current_pin", "")
+        if not new_pin or not isinstance(new_pin, str) or not new_pin.isdigit() or len(new_pin) != 5:
+            return Response({"error": "New PIN must be 5 digits"}, status=400)
+
+        setting = AdminSetting.objects.first()
+        if setting and setting.pin_hash:
+            # require current_pin
+            if not current_pin or not check_password(current_pin, setting.pin_hash):
+                return Response({"error": "Current PIN incorrect"}, status=403)
+
+        # Save/replace PIN hash
+        hashed = make_password(new_pin)
+        if not setting:
+            setting = AdminSetting.objects.create(pin_hash=hashed)
+        else:
+            setting.pin_hash = hashed
+            setting.save()
+        return Response({"message": "PIN updated"}, status=200)
+
+# --- DEBUG-only reset endpoint ---
+class AdminPinResetAPIView(APIView):
+    """
+    POST /api/admin/pin/reset-default/
+    DEBUG-only endpoint: resets admin PIN in database to DEFAULT_RESET_PIN and
+    revokes existing admin tokens. Only works when settings.DEBUG is True.
+    Remove this endpoint in production.
+    """
+    DEFAULT_RESET_PIN = "12345"
+
+    def post(self, request):
+        if not settings.DEBUG:
+            return Response({"error": "Not allowed in production"}, status=403)
+
+        hashed = make_password(self.DEFAULT_RESET_PIN)
+        setting = AdminSetting.objects.first()
+        if not setting:
+            setting = AdminSetting.objects.create(pin_hash=hashed)
+        else:
+            setting.pin_hash = hashed
+            setting.save()
+
+        # Revoke any existing admin tokens so clients must re-authenticate
+        AdminToken.objects.all().delete()
+
+        return Response({
+            "message": "Admin PIN reset to default (DEBUG only).",
+            "default_pin": self.DEFAULT_RESET_PIN,
+        })

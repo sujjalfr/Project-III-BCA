@@ -24,3 +24,24 @@ class Attendance(models.Model):
 
     def __str__(self):
         return f"{self.student.name} - {self.date} ({self.status})"
+
+
+class AdminSetting(models.Model):
+    """Singleton-ish model to store admin PIN hash."""
+    pin_hash = models.CharField(max_length=255, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"AdminSetting(id={self.id})"
+
+
+class AdminToken(models.Model):
+    """Simple token issued on successful PIN auth. Used to validate admin sessions."""
+    key = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def is_expired(self, lifetime_hours=168):
+        return (timezone.now() - self.created_at).total_seconds() > lifetime_hours * 3600
+
+    def __str__(self):
+        return f"AdminToken(key={self.key})"

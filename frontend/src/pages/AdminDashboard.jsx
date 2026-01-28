@@ -158,7 +158,47 @@ export default function AdminDashboard() {
     classGroupId: "",
   });
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [page, setPage] = useState(1);
+  const perPage = 14;
   const navigate = useNavigate();
+
+  // enforce admin auth (accept session flag as fast-path)
+  useEffect(() => {
+    (async () => {
+      try {
+        const sessionOk = sessionStorage.getItem("admin_authenticated") === "1";
+        if (sessionOk) return;
+
+        const token = localStorage.getItem("admin_token");
+        if (!token) return navigate("/");
+        const r = await fetch(`${API_BASE}/api/admin/auth/validate/`, {
+          method: "GET",
+          headers: { "X-Admin-Token": token },
+        });
+        if (!r.ok) return navigate("/");
+        const jd = await r.json();
+        if (!jd.valid) return navigate("/");
+      } catch (e) {
+        return navigate("/");
+      }
+    })();
+  }, [navigate]);
+
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  function logoutAdmin() {
+    try {
+      sessionStorage.removeItem("admin_authenticated");
+      localStorage.removeItem("admin_token");
+    } catch (e) {}
+    navigate("/");
+  }
+  function confirmLogout() {
+    setShowLogoutConfirm(true);
+  }
+  function performLogout() {
+    logoutAdmin();
+    setShowLogoutConfirm(false);
+  }
 
   // Load students
   useEffect(() => {
@@ -302,6 +342,13 @@ export default function AdminDashboard() {
       });
   }, [attendance, students, showAbsentOnly, showLateOnly, search, filters]);
 
+  const totalPages = Math.max(1, Math.ceil((filteredRows.length || 0) / perPage));
+  const pageData = filteredRows.slice((page - 1) * perPage, page * perPage);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(1);
+  }, [page, totalPages, filteredRows.length]);
+
   const refresh = () => {
     setLoading(true);
     setTimeout(() => {
@@ -324,6 +371,24 @@ export default function AdminDashboard() {
               >
                 Admin HomePage
               </button>
+              <button
+                onClick={confirmLogout}
+                className="bg-red-100 text-red-700 px-3 py-2 rounded border"
+                title="Logout admin session"
+              >
+                Logout
+              </button>
+              {showLogoutConfirm && (
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                  <div className="bg-white p-4 rounded shadow w-80">
+                    <div className="mb-3 font-medium">Confirm logout?</div>
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setShowLogoutConfirm(false)} className="px-3 py-1 border rounded">Cancel</button>
+                      <button onClick={performLogout} className="px-3 py-1 bg-red-600 text-white rounded">Logout</button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <select
                 value={range}
                 onChange={(e) => setRange(e.target.value)}
@@ -435,6 +500,7 @@ export default function AdminDashboard() {
                 <thead>
                   <tr className="text-left text-gray-600 border-b">
                     <th className="p-2">Student</th>
+                    <th className="p-2">Roll</th>
                     <th className="p-2">Class</th>
                     <th className="p-2">Status</th>
                     <th className="p-2">Time In</th>
@@ -444,14 +510,15 @@ export default function AdminDashboard() {
                 <tbody>
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="p-3 text-center text-gray-500">
+                      <td colSpan={6} className="p-3 text-center text-gray-500">
                         No students match filters.
                       </td>
                     </tr>
                   )}
-                  {filteredRows.map((row) => (
+                  {pageData.map((row) => (
                     <tr key={row.id} className="border-b hover:bg-gray-50">
                       <td className="p-2">{row.displayName}</td>
+                      <td className="p-2 font-mono text-sm">{row.roll}</td>
                       <td className="p-2">{row.className}</td>
                       <td className="p-2">
                         <StatusBadge status={row.status} />
@@ -469,6 +536,30 @@ export default function AdminDashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="flex items-center justify-between mt-3">
+              <div className="text-sm text-gray-600">
+                Showing {filteredRows.length ? `${(page - 1) * perPage + 1} - ${Math.min(page * perPage, filteredRows.length)} of ${filteredRows.length}` : "0 results"}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1 border rounded"
+                  disabled={page === 1}
+                >
+                  Prev
+                </button>
+                <div className="px-2 text-sm">
+                  {page} / {totalPages}
+                </div>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1 border rounded"
+                  disabled={page === totalPages}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         </div>

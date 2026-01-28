@@ -12,7 +12,7 @@ export default function ManageStudent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ deptId: '', batchId: '', classGroupId: '' });
-  const perPage = 8;
+  const perPage = 15;
   const navigate = useNavigate();
 
   // Fetch students from API

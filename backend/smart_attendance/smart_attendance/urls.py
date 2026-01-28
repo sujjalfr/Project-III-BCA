@@ -23,7 +23,9 @@ from accounts.views import StudentViewSet, StudentListView, departments_list, de
 from attendance.views import (
     AttendanceStatus, AttendanceStatusList, MarkAttendance,
     MostAbsentAPIView, ExportAttendanceExcelAPIView,
-    StudentAttendanceDetail, AttendanceUpdateAPIView
+    StudentAttendanceDetail, AttendanceUpdateAPIView,
+    AdminAuthAPIView, AdminAuthValidateAPIView, AdminPinAPIView,
+    AdminPinResetAPIView,
 )
 
 router = DefaultRouter()
@@ -44,6 +46,13 @@ urlpatterns = [
     path('api/batches/', all_batches),
     path('api/batches/<int:batch_id>/classgroups/', batch_classgroups),
     path('api/classgroups/', all_classgroups),
+
+    # Admin PIN / auth endpoints
+    path('api/admin/auth/', AdminAuthAPIView.as_view()),
+    path('api/admin/auth/validate/', AdminAuthValidateAPIView.as_view()),
+    path('api/admin/pin/', AdminPinAPIView.as_view()),
+    # DEBUG-only: reset admin PIN to default (remove in production)
+    path('api/admin/pin/reset-default/', AdminPinResetAPIView.as_view()),
 ]
 
 # Serve media files in development
