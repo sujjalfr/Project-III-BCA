@@ -103,13 +103,33 @@ export default function AddStudent() {
       setMsg("Name and roll are required");
       return;
     }
+
+    // If only classGroupId selected, try to auto-fill department_id & batch_id
+    let deptIdToSend = deptBatchClass.deptId;
+    let batchIdToSend = deptBatchClass.batchId;
+    const classGroupIdToSend = deptBatchClass.classGroupId;
+    if (classGroupIdToSend && (!deptIdToSend || !batchIdToSend)) {
+      try {
+        const resp = await axios.get(`${API_BASE}/api/classgroups/`);
+        const list = resp.data || [];
+        const found = list.find((c) => String(c.id) === String(classGroupIdToSend));
+        if (found) {
+          deptIdToSend = deptIdToSend || String(found.department_id || "");
+          batchIdToSend = batchIdToSend || String(found.batch_id || "");
+        }
+      } catch (err) {
+        // silent fallback: proceed without auto-fill
+        console.warn("Could not fetch classgroups to auto-fill dept/batch", err);
+      }
+    }
+
     const fd = new FormData();
     fd.append("name", form.name);
     fd.append("roll_no", form.roll_no);
     // backend serializer expects department_id / batch_id / class_group_id
-    if (deptBatchClass.deptId) fd.append("department_id", deptBatchClass.deptId);
-    if (deptBatchClass.batchId) fd.append("batch_id", deptBatchClass.batchId);
-    if (deptBatchClass.classGroupId) fd.append("class_group_id", deptBatchClass.classGroupId);
+    if (deptIdToSend) fd.append("department_id", deptIdToSend);
+    if (batchIdToSend) fd.append("batch_id", batchIdToSend);
+    if (classGroupIdToSend) fd.append("class_group_id", classGroupIdToSend);
     if (imageBlob) {
       const filename = `${form.roll_no || "student"}.jpg`;
       fd.append("image", imageBlob, filename);
@@ -118,9 +138,12 @@ export default function AddStudent() {
     try {
       const token = localStorage.getItem("admin_token");
       const headers = token ? { Authorization: `Token ${token}` } : {};
+      // POST to DRF students endpoint so FK fields are saved properly
       const url = `${API_BASE}/api/students/`;
-      await axios.post(url, fd, { headers });
-      navigate(`/admin/student/${form.roll_no}`);
+      const resp = await axios.post(url, fd, { headers });
+      const created = resp?.data;
+      const roll = created?.roll_no || form.roll_no;
+      navigate(`/admin/student/${roll}`);
     } catch (err) {
       console.error("Add student failed", err);
       const em = err?.response?.data?.detail || err?.response?.data || err.message;
@@ -186,7 +209,7 @@ export default function AddStudent() {
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={() => navigate(-1)} className="px-3 py-1 border rounded">Cancel</button>
-          <button type="submit" className="px-3 py-1 bg-green-600 text-white rounded">Save to server</button>
+          <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded">Save</button>
         </div>
       </form>
     </div>

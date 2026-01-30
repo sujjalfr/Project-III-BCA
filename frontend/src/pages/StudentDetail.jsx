@@ -55,17 +55,6 @@ function computeStatusFromTime(hhmm) {
   return "late";
 }
 
-/**
- * StudentDetail page
- *
- * Fixes:
- * - Uses native time inputs for editing attendance time (both today's attendance and historical records)
- * - Validates HH:MM and converts to an ISO-like datetime string payload expected by backend:
- *   `${date}T${HH:MM}:00`
- *   where `date` is record.date (if present) or today's date for today's attendance
- * - Updates `attendanceDetails.records` and today's `attendance` object locally after successful PATCH
- * - Defensive checks to avoid undefined state updates
- */
 export default function StudentDetail() {
   const { rollNo } = useParams();
   const navigate = useNavigate();
