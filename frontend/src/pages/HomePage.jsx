@@ -316,7 +316,7 @@ function HomePage() {
                 </div>
               </div>
             )}
-            <select
+            {/* <select
               value={range}
               onChange={(e) => setRange(e.target.value)}
               className="border rounded px-2 py-1"
@@ -327,7 +327,7 @@ function HomePage() {
             </select>
             <button onClick={refresh} className="px-3 py-2 border rounded">
               {loading ? "Refreshing…" : "Refresh"}
-            </button>
+            </button> */}
           </div>
         </div>
 

@@ -8,6 +8,7 @@ import AdminDashboard  from './pages/AdminDashboard'
 import AdminStudentsPage from './pages/AdminStudents'
 import AdminSettings from './pages/AdminSettings'
 import StudentDetail from './pages/StudentDetail'
+import AddStudent from "./components/Admin/StudentManagement/AddStudent";
 
 function App() {
 
@@ -18,6 +19,7 @@ function App() {
             <Route path="/home" element={<HomePage />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/students" element={<AdminStudentsPage />} />
+            <Route path="/admin/students/add" element={<AddStudent />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
             <Route path="/admin/student" element={<StudentDetail />} />
             <Route path="/admin/student/:rollNo" element={<StudentDetail />} />

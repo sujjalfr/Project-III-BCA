@@ -159,6 +159,8 @@ export default function AdminDashboard() {
   });
   const [lastUpdated, setLastUpdated] = useState(null);
   const [page, setPage] = useState(1);
+  const [selectedDate, setSelectedDate] = useState("");
+  const todayISO = new Date().toISOString().slice(0,10);
   const perPage = 14;
   const navigate = useNavigate();
 
@@ -227,7 +229,9 @@ export default function AdminDashboard() {
   useEffect(() => {
     let mounted = true;
     axios
-      .get(`${API_BASE}/api/attendanceStatus/list/`)
+      .get(`${API_BASE}/api/attendanceStatus/list/`, {
+        params: selectedDate ? { date: selectedDate } : {},
+      })
       .then((r) => {
         if (!mounted) return;
         const data = (r.data.results || []).map((d) => ({ 
@@ -243,14 +247,24 @@ export default function AdminDashboard() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [selectedDate]);
 
   // Derive metrics from attendance
   useEffect(() => {
     setLoading(true);
     const timer = setTimeout(() => {
-      if (!attendance.length || !students.length) {
-        setMetrics(null);
+      // If there's no attendance data, return zeroed metrics so UI shows 0s consistently.
+      if (!attendance.length) {
+        setMetrics({
+          attendancePct: 0,
+          attendanceDelta: 0,
+          activeStudents: 0,
+          absentCount: 0,
+          lateCount: 0,
+          onTimeCount: 0,
+          scansPerHour: Array.from({ length: 24 }, () => 0),
+        });
+        setLastUpdated(new Date());
         setLoading(false);
         return;
       }
@@ -365,6 +379,23 @@ export default function AdminDashboard() {
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold">Admin Dashboard</h1>
             <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-600">Date</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="border rounded px-2 py-1"
+                  placeholder={todayISO}
+                />
+                <button
+                  onClick={() => setSelectedDate("")}
+                  title="Clear date"
+                  className="px-2 py-1 border rounded text-sm"
+                >
+                  Clear
+                </button>
+              </div>
               <button
                 onClick={() => navigate("/home")}
                 className="bg-gray-100 px-3 py-2 rounded border"
@@ -389,7 +420,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               )}
-              <select
+              {/* <select
                 value={range}
                 onChange={(e) => setRange(e.target.value)}
                 className="border rounded px-2 py-1"
@@ -400,7 +431,7 @@ export default function AdminDashboard() {
               </select>
               <button onClick={refresh} className="px-3 py-2 border rounded">
                 {loading ? "Refreshing…" : "Refresh"}
-              </button>
+              </button> */}
             </div>
           </div>
 

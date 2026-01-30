@@ -69,9 +69,19 @@ class AttendanceStatus(APIView):
         return Response(response_data)
 
 class AttendanceStatusList(APIView):
-    """List attendance status for all students today"""
+    """List attendance status for all students for a given date (defaults to today)"""
     def get(self, request):
-        today = timezone.now().date()
+        # Accept optional `date` query param (YYYY-MM-DD). If provided and valid, use it.
+        date_str = request.query_params.get("date")
+        try:
+            if date_str:
+                today = datetime.strptime(date_str, "%Y-%m-%d").date()
+            else:
+                today = timezone.now().date()
+        except Exception:
+            # invalid format -> respond with 400
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+        
         students = Student.objects.select_related('class_group', 'batch', 'department').all()
         
         result = []

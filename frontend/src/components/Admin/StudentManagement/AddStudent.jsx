@@ -1,108 +1,194 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import ChainedSelects from "./ChainedSelects";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 export default function AddStudent() {
-  const [form, setForm] = useState({ name: "", roll: "", batch: "", department: "", image: null });
+  const [form, setForm] = useState({ name: "", roll_no: "" });
+  const [deptBatchClass, setDeptBatchClass] = useState({
+    deptId: "",
+    batchId: "",
+    classGroupId: "",
+  });
+  const [preview, setPreview] = useState(null);
+  const [imageBlob, setImageBlob] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [msg, setMsg] = useState("");
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const navigate = useNavigate();
 
+  const handleChainedChange = useCallback((vals) => setDeptBatchClass(vals), []);
+
+  // When a class group is selected, fetch its batch/department and auto-fill those fields
   useEffect(() => {
-    let stream;
-    async function start() {
-      if (!showCamera) return;
+    let mounted = true;
+    async function fillFromClassGroup() {
+      const classId = deptBatchClass.classGroupId;
+      if (!classId) return;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        const resp = await axios.get(`${API_BASE}/api/classgroups/`);
+        if (!mounted) return;
+        const list = resp.data || [];
+        const found =
+          list.find((c) => String(c.id) === String(classId)) ||
+          list.find((c) => String(c.id) === String(classId?.id));
+        if (found) {
+          setDeptBatchClass((s) => ({
+            ...s,
+            deptId: String(found.department_id || found.department || "") || s.deptId,
+            batchId: String(found.batch_id || found.batch || "") || s.batchId,
+            classGroupId: String(classId),
+          }));
+        }
       } catch (e) {
-        console.warn("Camera not available", e);
-        setShowCamera(false);
+        console.warn("Could not auto-fill dept/batch from class group", e);
       }
     }
-    start();
+    fillFromClassGroup();
     return () => {
-      if (stream) stream?.getTracks().forEach((t) => t.stop());
+      mounted = false;
+    };
+  }, [deptBatchClass.classGroupId]);
+
+  useEffect(() => {
+    let stream;
+    if (!showCamera) return;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      } catch (e) {
+        console.error("Camera error", e);
+        setMsg("Unable to access camera");
+        setShowCamera(false);
+      }
+    })();
+    return () => {
+      stream?.getTracks?.().forEach((t) => t.stop());
     };
   }, [showCamera]);
 
   function handleCapture() {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg");
-    setForm((f) => ({ ...f, image: dataUrl }));
-    setShowCamera(false);
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    if (!v || !c) return;
+    c.width = v.videoWidth || 640;
+    c.height = v.videoHeight || 480;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    c.toBlob((blob) => {
+      if (!blob) return;
+      setImageBlob(blob);
+      const url = URL.createObjectURL(blob);
+      setPreview(url);
+      setShowCamera(false);
+    }, "image/jpeg", 0.9);
   }
 
   function handleFile(e) {
-    const file = e.target.files && e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setForm((f) => ({ ...f, image: reader.result }));
-    reader.readAsDataURL(file);
+    setImageBlob(file);
+    const url = URL.createObjectURL(file);
+    setPreview(url);
   }
 
-  function save() {
-    // read existing list, prepend the new student, persist
-    try {
-      const saved = JSON.parse(localStorage.getItem("students") || "[]");
-      const id = saved.length ? Math.max(...saved.map((s) => s.id)) + 1 : 1;
-      const payload = { ...form, id };
-      const next = [payload, ...saved];
-      localStorage.setItem("students", JSON.stringify(next));
-    } catch (e) {
-      console.warn(e);
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg("");
+    if (!form.name || !form.roll_no) {
+      setMsg("Name and roll are required");
+      return;
     }
-    // go back to list
-    navigate("/admin/students");
+    const fd = new FormData();
+    fd.append("name", form.name);
+    fd.append("roll_no", form.roll_no);
+    // backend serializer expects department_id / batch_id / class_group_id
+    if (deptBatchClass.deptId) fd.append("department_id", deptBatchClass.deptId);
+    if (deptBatchClass.batchId) fd.append("batch_id", deptBatchClass.batchId);
+    if (deptBatchClass.classGroupId) fd.append("class_group_id", deptBatchClass.classGroupId);
+    if (imageBlob) {
+      const filename = `${form.roll_no || "student"}.jpg`;
+      fd.append("image", imageBlob, filename);
+    }
+
+    try {
+      const token = localStorage.getItem("admin_token");
+      const headers = token ? { Authorization: `Token ${token}` } : {};
+      const url = `${API_BASE}/api/students/`;
+      await axios.post(url, fd, { headers });
+      navigate(`/admin/student/${form.roll_no}`);
+    } catch (err) {
+      console.error("Add student failed", err);
+      const em = err?.response?.data?.detail || err?.response?.data || err.message;
+      setMsg(String(em || "Failed to add student"));
+    }
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-3xl mx-auto">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Add Student</h1>
-        <div className="flex gap-2">
-          <button onClick={() => navigate(-1)} className="px-3 py-2 border rounded">Cancel</button>
-          <button onClick={save} className="px-3 py-2 bg-blue-600 text-white rounded">Save</button>
-        </div>
+        <h2 className="text-2xl font-semibold">Add Student</h2>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-4 rounded shadow">
-        <div className="space-y-3">
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full border px-3 py-2 rounded" placeholder="Name" />
-          <input value={form.roll} onChange={(e) => setForm({ ...form, roll: e.target.value })} className="w-full border px-3 py-2 rounded" placeholder="Roll" />
-          <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} className="w-full border px-3 py-2 rounded" placeholder="Batch" />
-          <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} className="w-full border px-3 py-2 rounded" placeholder="Department" />
-
-          <div className="flex gap-2 items-center">
-            <label className="text-sm text-gray-600">Upload image</label>
-            <input type="file" accept="image/*" onChange={handleFile} />
-          </div>
-          <div className="flex gap-2 items-center">
-            <button onClick={() => setShowCamera((s) => !s)} className="px-3 py-2 border rounded">{showCamera ? 'Close Camera' : 'Open Camera'}</button>
-            <button onClick={handleCapture} disabled={!showCamera} className="px-3 py-2 bg-blue-600 text-white rounded">Capture</button>
-          </div>
+      <form onSubmit={handleSubmit} className="space-y-4 bg-white p-4 rounded shadow">
+        <div>
+          <label className="block text-sm">Name</label>
+          <input
+            className="w-full border px-3 py-2 rounded"
+            value={form.name}
+            onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
+            required
+          />
         </div>
 
         <div>
-          <div className="text-sm text-gray-500 mb-2">Preview</div>
-          <div className="w-full h-64 bg-gray-100 rounded flex items-center justify-center overflow-hidden">
-            {showCamera ? (
-              <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-            ) : form.image ? (
-              <img src={form.image} alt="preview" className="w-full h-full object-cover" />
-            ) : (
-              <div className="text-xs text-gray-400">No image selected</div>
+          <label className="block text-sm">Roll No</label>
+          <input
+            className="w-full border px-3 py-2 rounded"
+            value={form.roll_no}
+            onChange={(e) => setForm((s) => ({ ...s, roll_no: e.target.value }))}
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm mb-1">Department / Batch / Class</label>
+            <ChainedSelects onChange={handleChainedChange} />
+        </div>
+
+        <div>
+          <label className="block text-sm mb-1">Photo</label>
+          <div className="flex gap-2 items-center">
+            <input type="file" accept="image/*" onChange={handleFile} />
+            <button type="button" onClick={() => setShowCamera((s) => !s)} className="px-3 py-1 border rounded">
+              {showCamera ? "Close Camera" : "Use Camera"}
+            </button>
+            {preview && (
+              <img src={preview} alt="preview" className="w-20 h-20 object-cover border rounded" />
             )}
           </div>
-          <canvas ref={canvasRef} className="hidden" />
+          {showCamera && (
+            <div className="mt-2">
+              <video ref={videoRef} autoPlay playsInline className="w-full max-w-sm border rounded" />
+              <div className="mt-2">
+                <button type="button" onClick={handleCapture} className="px-3 py-1 bg-blue-600 text-white rounded">Capture</button>
+                <canvas ref={canvasRef} style={{ display: "none" }} />
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+
+        {msg && <div className="text-sm text-red-600">{msg}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => navigate(-1)} className="px-3 py-1 border rounded">Cancel</button>
+          <button type="submit" className="px-3 py-1 bg-green-600 text-white rounded">Save to server</button>
+        </div>
+      </form>
     </div>
   );
 }
