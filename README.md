@@ -13,6 +13,10 @@ Highlights
 - Attendance stored with timestamp; admin export to CSV/Excel
 - Supports server-side (dlib) or client-side (face-api.js) recognition
 
+<!-- sudo systemctl stop mariadb
+      sudo systemctl disable mariadb -->
+first enable mariadb ```sudo systemctl start mariadb```
+
 Getting started (dev)
 1. Follow SETUP.md to install system packages and create venv.
 2. Install backend dependencies:
