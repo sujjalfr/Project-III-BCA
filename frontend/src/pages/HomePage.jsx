@@ -3,7 +3,7 @@ import ChainedSelects from "../components/Admin/StudentManagement/ChainedSelects
 import Sidebar from "../components/Admin/Sidebar";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { formatNPTOrDash } from "../utils/helpers";
+import { formatNPTOrDash, parseHourFromTimeString } from "../utils/helpers";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
@@ -146,7 +146,7 @@ function HomePage() {
       .get(`${API_BASE}/api/attendanceStatus/list/`)
       .then((r) => {
         if (!mounted) return;
-        console.log("Attendance data loaded:", r.data);
+        console.log("AttendanceStatusList response:", r.data);
         const data = (r.data.results || []).map((d) => ({ 
           ...d, 
           id: String(d.id) 
@@ -187,18 +187,16 @@ function HomePage() {
       const total = showAttendanceStatus.length || 1;
       const attendancePct = Math.round((presentCount / total) * 100);
 
-      const scansPerHour = Array.from(
-        { length: 24 },
-        (_, hour) =>
-          showAttendanceStatus.filter((s) => {
-            if (!s.time) return false;
-            try {
-              const scanTime = new Date(s.time);
-              return scanTime.getHours() === hour;
-            } catch {
-              return false;
-            }
-          }).length,
+      const scansPerHour = Array.from({ length: 24 }, (_, hour) =>
+        showAttendanceStatus.filter((s) => {
+          if (!s.time) return false;
+          try {
+            const h = parseHourFromTimeString(s.time);
+            return h === hour;
+          } catch {
+            return false;
+          }
+        }).length,
       );
 
       const calculatedMetrics = {
