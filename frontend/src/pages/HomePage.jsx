@@ -141,24 +141,30 @@ function HomePage() {
   // Load attendance statuses
   useEffect(() => {
     let mounted = true;
-    console.log(`Loading attendance from: ${API_BASE}/api/attendanceStatus/list/`);
-    axios
-      .get(`${API_BASE}/api/attendanceStatus/list/`)
-      .then((r) => {
+    let timerId = null;
+
+    const fetchAttendance = async () => {
+      try {
+        const r = await axios.get(`${API_BASE}/api/attendanceStatus/list/`);
         if (!mounted) return;
         console.log("AttendanceStatusList response:", r.data);
-        const data = (r.data.results || []).map((d) => ({ 
-          ...d, 
-          id: String(d.id) 
-        }));
+        const data = (r.data.results || []).map((d) => ({ ...d, id: String(d.id) }));
         setShowAttendanceStatus(data);
-      })
-      .catch((err) => {
+        setLastUpdated(new Date());
+      } catch (err) {
         console.error("Failed to fetch attendance status:", err);
-        setShowAttendanceStatus([]);
-      });
+        if (mounted) setShowAttendanceStatus([]);
+      }
+    };
+
+    // Initial fetch
+    fetchAttendance();
+    // Poll every 5 seconds so HomePage stays in sync with incoming scans
+    timerId = setInterval(fetchAttendance, 5000);
+
     return () => {
       mounted = false;
+      if (timerId) clearInterval(timerId);
     };
   }, []);
 
