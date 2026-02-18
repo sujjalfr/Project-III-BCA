@@ -11,6 +11,9 @@ import StudentDetail from './pages/StudentDetail'
 import AddStudent from "./components/Admin/StudentManagement/AddStudent";
 import AdminLookups from "./pages/AdminLookups";
 
+// NEW: RequireAdmin wrapper
+import RequireAdmin from "./components/Admin/RequireAdmin";
+
 function App() {
 
   return (
@@ -18,13 +21,43 @@ function App() {
          <Routes>
             <Route path="/" element={<AttendancePage />} />
             <Route path="/home" element={<HomePage />} />
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/lookups" element={<AdminLookups />} />
-            <Route path="/admin/students" element={<AdminStudentsPage />} />
-            <Route path="/admin/students/add" element={<AddStudent />} />
-            <Route path="/admin/settings" element={<AdminSettings />} />
-            <Route path="/admin/student" element={<StudentDetail />} />
-            <Route path="/admin/student/:rollNo" element={<StudentDetail />} />
+
+            {/* Protected admin routes */}
+            <Route path="/admin" element={
+              <RequireAdmin>
+                <AdminDashboard />
+              </RequireAdmin>
+            } />
+            <Route path="/admin/lookups" element={
+              <RequireAdmin>
+                <AdminLookups />
+              </RequireAdmin>
+            } />
+            <Route path="/admin/students" element={
+              <RequireAdmin>
+                <AdminStudentsPage />
+              </RequireAdmin>
+            } />
+            <Route path="/admin/students/add" element={
+              <RequireAdmin>
+                <AddStudent />
+              </RequireAdmin>
+            } />
+            <Route path="/admin/settings" element={
+              <RequireAdmin>
+                <AdminSettings />
+              </RequireAdmin>
+            } />
+            <Route path="/admin/student" element={
+              <RequireAdmin>
+                <StudentDetail />
+              </RequireAdmin>
+            } />
+            <Route path="/admin/student/:rollNo" element={
+              <RequireAdmin>
+                <StudentDetail />
+              </RequireAdmin>
+            } />
          </Routes>
     </Router>
   )
