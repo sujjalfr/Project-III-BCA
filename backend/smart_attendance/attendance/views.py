@@ -12,6 +12,8 @@ from accounts.models import Student
 import openpyxl
 from django.http import HttpResponse
 from datetime import time as datetime_time
+import shutil
+from pathlib import Path
 
 from .utils.image_store import save_attendance_image_from_path
 from django.conf import settings
@@ -195,6 +197,31 @@ class MarkAttendance(APIView):
                         os.remove(path)
                 except Exception:
                     pass
+
+            # NEW: copy/move saved image into weekday folder and prune older files
+            try:
+                if saved_path and os.path.exists(saved_path):
+                    weekday = attendance.date.strftime("%A")  # e.g., 'Monday'
+                    dest_dir = os.path.join(settings.MEDIA_ROOT, "attendance_weekday", weekday)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    dest_path = os.path.join(dest_dir, f"{student.roll_no}.jpg")
+                    # copy latest image (overwrite)
+                    shutil.copy2(saved_path, dest_path)
+
+                    # prune files older than 7 days in this weekday folder
+                    now_ts = datetime.now().timestamp()
+                    seven_days = 7 * 24 * 3600
+                    for fname in os.listdir(dest_dir):
+                        fpath = os.path.join(dest_dir, fname)
+                        try:
+                          if os.path.isfile(fpath):
+                            mtime = os.path.getmtime(fpath)
+                            if (now_ts - mtime) > seven_days:
+                              os.remove(fpath)
+                        except Exception:
+                          logger.exception("Failed to prune file %s", fpath)
+            except Exception:
+                logger.exception("Failed to copy/prune weekday attendance images")
 
             print(f"Attendance marked for {student.name}")
             return Response({
