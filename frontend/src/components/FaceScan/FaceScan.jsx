@@ -15,6 +15,7 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      stopCamera(); // ensure camera stopped on unmount
     };
   }, []);
 
@@ -23,6 +24,27 @@ const FaceScan = ({ rollNo, onResult, autoScan = false }) => {
       setIsCapturing(true);
     }
   }, [autoScan, rollNo]);
+
+  useEffect(() => {
+    if (!isCapturing) {
+      stopCamera();
+    }
+  }, [isCapturing]);
+
+  const stopCamera = () => {
+    try {
+      const cam = webcamRef.current;
+      const video = cam && cam.video;
+      if (video && video.srcObject) {
+        const tracks = video.srcObject.getTracks() || [];
+        tracks.forEach((t) => {
+          try { t.stop(); } catch { /* ignore */ }
+        });
+        // detach
+        try { video.srcObject = null; } catch {}
+      }
+    } catch (e) { /* ignore */ }
+  };
 
   useEffect(() => {
     if (!isCapturing) return;

@@ -20,24 +20,27 @@ const FaceScanFlow = () => {
   const [isCapturing, setIsCapturing] = useState(false);
   const processingRef = useRef(false); // avoid race conditions
 
-  // Step 1: Scan QR
-  const handleScan = (data) => {
-    if (data) {
-      setRollNo(data);
-      setStep("face");
-    }
+  // helper to stop camera
+  const stopCamera = () => {
+    try {
+      const video = webcamRef.current && webcamRef.current.video;
+      if (video && video.srcObject) {
+        const tracks = video.srcObject.getTracks() || [];
+        tracks.forEach((t) => {
+          try { t.stop(); } catch {}
+        });
+        try { video.srcObject = null } catch {}
+      }
+    } catch {}
   };
 
-  // Step 2: Manual entry
-  const handleManualSubmit = (e) => {
-    e.preventDefault();
-    if (manualInput.trim()) {
-      setRollNo(manualInput.trim());
-      setStep("face");
-    }
-  };
+  // ensure camera is stopped when leaving face step or unmount
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
 
-  // Step 3: Continuous Face Scan
   useEffect(() => {
     let intervalId;
     if (step === "face") {
@@ -90,10 +93,13 @@ const FaceScanFlow = () => {
         }
       }, 500);
     }
+    // when leaving face step, ensure camera is stopped
+    if (step !== "face") stopCamera();
+
     return () => {
-      setIsCapturing(false);
-      processingRef.current = false;
+      // cleanup interval and stop camera
       if (intervalId) clearInterval(intervalId);
+      stopCamera();
     };
   }, [step, rollNo, isCapturing]);
 
